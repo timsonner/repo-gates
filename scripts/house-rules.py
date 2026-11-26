@@ -13,10 +13,10 @@ MANIFEST_PATH = ROOT / "rules" / "manifest.json"
 HASH = chr(35)
 EM = "\u2014"
 AGENT_FOOTER_EXACT = (
-    re.compile(r"<!--\s*CURSOR_AGENT_PR_BODY_BEGIN\s*-->"),
-    re.compile(r"<!--\s*CURSOR_AGENT_PR_BODY_END\s*-->"),
-    re.compile(r"cursor\.com/agents/\S*cursor_ref=pr_footer"),
-    re.compile(r"cursor\.com/background-agent[/?]\S*cursor_ref=pr_footer"),
+    re.compile(r"<!--\s*CURSOR_AGENT_PR_BODY_BEGIN\s*-->", re.IGNORECASE),
+    re.compile(r"<!--\s*CURSOR_AGENT_PR_BODY_END\s*-->", re.IGNORECASE),
+    re.compile(r"cursor\.com/agents[/?]\S*cursor_ref=pr_footer", re.IGNORECASE),
+    re.compile(r"cursor\.com/background-agent[/?]\S*cursor_ref=pr_footer", re.IGNORECASE),
 )
 
 DISPATCH = {

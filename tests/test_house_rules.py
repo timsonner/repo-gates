@@ -119,8 +119,14 @@ class TestC1(FixtureCase):
         samples = [
             "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->",
             "<!-- CURSOR_AGENT_PR_BODY_END -->",
+            "<!-- cursor_agent_pr_body_begin -->",
             "https://cursor.com/agents/bc-1?cursor_ref=pr_footer",
+            "https://cursor.com/agents?cursor_ref=pr_footer",
+            "https://cursor.com/agents/bc-1?CURSOR_REF=pr_footer",
+            "https://cursor.com/agents/bc-1?cursor_ref=PR_FOOTER",
+            "https://Cursor.com/agents/bc-1?cursor_ref=pr_footer",
             "https://cursor.com/background-agent?cursor_ref=pr_footer",
+            "https://CURSOR.COM/background-agent?cursor_ref=pr_footer",
             "https://cursor.com/agents/bc-1?x=1&cursor_ref=pr_footer",
             "[view](https://cursor.com/background-agent?cursor_ref=pr_footer)",
         ]
@@ -128,6 +134,9 @@ class TestC1(FixtureCase):
             data = data_with_message(load_fixture("good_pr.json"), sample)
             _, findings = evaluate(data)
             self.assertEqual(module.worst(findings, 1), "FAIL", sample)
+        plain = data_with_message(load_fixture("good_pr.json"), "See cursor.com and the Cursor editor.")
+        _, findings = evaluate(plain)
+        self.assertEqual(module.worst(findings, 1), "PASS", [item.reason for item in findings if item.check == 1])
 
 
 class TestC2(FixtureCase):
