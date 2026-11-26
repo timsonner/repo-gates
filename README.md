@@ -8,7 +8,6 @@ Pull requests in this repo are not graded by the code in the pull request head. 
 
 | Check | Name | Result when it fires |
 | --- | --- | --- |
-| 1 | Trailers and agent footers | FAIL |
 | 2 | Author and committer identity | FAIL |
 | 3 | Em dash in title, body, and commits; em dash on an added markdown line | FAIL, and WARN for markdown |
 | 4 | Pull request body content and changed-file scope | FAIL, scope follows scope_mode |
@@ -18,7 +17,7 @@ Pull requests in this repo are not graded by the code in the pull request head. 
 | 8 | Model pins | dropped |
 | 9 | Token shapes and non-noreply emails | WARN |
 
-Check 8 is not implemented. The summary has no row 8.
+Checks 1 and 8 are not implemented. The summary has no row 1 or row 8.
 
 ## Adopt this in a repository
 

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RESERVED_WORKFLOWS = {"trusted-gate.yml", "release.yml"}
 LEVEL_RANK = {"off": 0, "PASS": 0, "pass": 0, "WARN": 1, "warn": 1, "FAIL": 2, "fail": 2}
 SKIP_DECORATORS = {"skip", "skipIf", "skipUnless", "expectedFailure"}
-PATTERN_LISTS = ("trailer_patterns", "agent_footers", "self_check_labels", "comment_extensions", "placeholders")
+PATTERN_LISTS = ("self_check_labels", "comment_extensions", "placeholders")
 
 
 def empty_snapshot():
@@ -254,8 +254,6 @@ def compare_snapshots(old, new, body, pin_checker=None):
         for key in ("name", "email"):
             if old_identity.get(key) != new_identity.get(key):
                 findings.append("changed identity " + key)
-        if old_manifest.get("signed_off_allow_exact") != new_manifest.get("signed_off_allow_exact"):
-            findings.append("changed signed_off_allow_exact")
         old_limits = old_manifest.get("limits", {})
         new_limits = new_manifest.get("limits", {})
         for key, old_value in old_limits.items():

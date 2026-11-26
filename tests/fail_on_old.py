@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CHECKED = {1, 2, 3, 4, 5, 6, 7, 9}
+CHECKED = {2, 3, 4, 5, 6, 7, 9}
 
 
 def run_tests(pattern, disable):

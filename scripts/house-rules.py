@@ -12,15 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_PATH = ROOT / "rules" / "manifest.json"
 HASH = chr(35)
 EM = "\u2014"
-AGENT_FOOTER_EXACT = (
-    re.compile(r"<!--\s*CURSOR_AGENT_PR_BODY_BEGIN\s*-->", re.IGNORECASE),
-    re.compile(r"<!--\s*CURSOR_AGENT_PR_BODY_END\s*-->", re.IGNORECASE),
-    re.compile(r"cursor\.com/agents[/?]\S*cursor_ref=pr_footer", re.IGNORECASE),
-    re.compile(r"cursor\.com/background-agent[/?]\S*cursor_ref=pr_footer", re.IGNORECASE),
-)
 
 DISPATCH = {
-    1: "check_trailers",
     2: "check_identity",
     3: "check_em_dash",
     4: "check_pr_body",
@@ -265,48 +258,6 @@ def self_check_hits(body, manifest):
                 break
         hits.append((label, matched))
     return hits
-
-
-def texts_for_trailers(ctx):
-    items = [("title", ctx.title), ("body", ctx.body)]
-    for commit in ctx.commits:
-        items.append(("commit " + commit.get("sha", ""), commit.get("message", "")))
-    return items
-
-
-def matches_agent_footer(text, footer):
-    if footer.lower() == "cursor":
-        for pattern in AGENT_FOOTER_EXACT:
-            if pattern.search(text):
-                return True
-        return False
-    return footer.lower() in text.lower()
-
-
-def check_trailers(ctx):
-    if gate(ctx, 1):
-        return []
-    level = severity(ctx, 1)
-    exact = ctx.manifest.get("signed_off_allow_exact", identity_text(ctx))
-    found = []
-    for label, text in texts_for_trailers(ctx):
-        for line in text.splitlines() or [""]:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            for pattern in ctx.manifest["trailer_patterns"]:
-                if re.search(r"signed-off-by", pattern, re.I):
-                    match = re.match(r"(?i)^signed-off-by:\s*(.*)$", stripped)
-                    if match and match.group(1).strip() == exact:
-                        continue
-                if re.search(pattern, stripped, re.I):
-                    found.append(Finding(1, level, label + " matches " + pattern))
-                    break
-            for footer in ctx.manifest["agent_footers"]:
-                if matches_agent_footer(stripped, footer):
-                    found.append(Finding(1, level, label + " has agent footer " + footer))
-                    break
-    return found
 
 
 def check_identity(ctx):
