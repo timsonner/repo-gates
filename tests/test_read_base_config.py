@@ -28,6 +28,8 @@ def init_repo(tmp):
     git(repo, "config", "user.name", "Tim Sonner")
     git(repo, "config", "user.email", "66705347+timsonner@users.noreply.github.com")
     git(repo, "config", "commit.gpgsign", "false")
+    git(repo, "config", "tag.gpgsign", "false")
+    git(repo, "config", "advice.nestedTag", "false")
     (repo / "README.md").write_text("hello\n", encoding="utf-8")
     git(repo, "add", "README.md")
     git(repo, "commit", "-m", "init")
@@ -79,6 +81,22 @@ def output_path(out):
         if line.startswith("path="):
             found = line[5:]
     return found
+
+
+def annotated_tag(repo, name, target):
+    git(repo, "tag", "-a", "-m", name, name, target)
+    return subprocess.check_output(["git", "rev-parse", "refs/tags/" + name], cwd=repo, text=True).strip()
+
+
+def assert_rejected(test, repo, sha):
+    proc, out, temp = run_script(repo, sha)
+    test.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+    test.assertIn("commit", proc.stderr)
+    test.assertEqual(output_path(out), "")
+    test.assertFalse(blobs_contain(temp, "any"))
+    checked, _, checked_temp = run_script(repo, sha, ["--check"])
+    test.assertNotEqual(checked.returncode, 0, checked.stderr)
+    test.assertFalse(blobs_contain(checked_temp, "any"))
 
 
 def blobs_contain(temp, needle):
@@ -179,12 +197,49 @@ class TestBaseSha(unittest.TestCase):
             self.assertEqual(output_path(kept_out), "")
             self.assertFalse(blobs_contain(kept_temp, "any"))
 
+    def repo_with_any(self, tmp):
+        repo = init_repo(tmp)
+        stage_config(repo, ANY)
+        git(repo, "commit", "-m", "config")
+        return repo
+
+    def test_base_sha_annotated_tag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with_any(tmp)
+            tag = annotated_tag(repo, "mark", head(repo))
+            self.assertEqual(subprocess.check_output(["git", "cat-file", "-t", tag], cwd=repo, text=True).strip(), "tag")
+            assert_rejected(self, repo, tag)
+
+    def test_base_sha_nested_tag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with_any(tmp)
+            inner = annotated_tag(repo, "inner", head(repo))
+            outer = annotated_tag(repo, "outer", inner)
+            self.assertEqual(subprocess.check_output(["git", "cat-file", "-t", outer], cwd=repo, text=True).strip(), "tag")
+            self.assertNotEqual(outer, inner)
+            assert_rejected(self, repo, outer)
+
+    def test_base_sha_tag_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with_any(tmp)
+            tree = subprocess.check_output(["git", "rev-parse", head(repo) + "^{tree}"], cwd=repo, text=True).strip()
+            tag = annotated_tag(repo, "ontree", tree)
+            assert_rejected(self, repo, tag)
+
+    def test_base_sha_tag_blob(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with_any(tmp)
+            blob = subprocess.check_output(["git", "rev-parse", head(repo) + ":README.md"], cwd=repo, text=True).strip()
+            tag = annotated_tag(repo, "onblob", blob)
+            assert_rejected(self, repo, tag)
+
     def test_base_sha_guard_runs_before_show(self):
         text = script_path().read_text(encoding="utf-8")
         call = text.index("\nrequire_base_sha\n")
         show = text.index('git show "$BASE_SHA:.github/repo-gates.json"')
         self.assertLess(call, show)
-        self.assertIn('git cat-file -e "$base^{commit}"', text)
+        self.assertIn('[ "$(git cat-file -t "$base" 2>/dev/null)" = "commit" ]', text)
+        self.assertNotIn("^{", text)
         self.assertIn("^[0-9a-f]{40}$", text)
 
     def test_base_sha_steps_call_guard(self):

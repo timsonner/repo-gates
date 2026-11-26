@@ -50,6 +50,14 @@ def without_base_sha_guard(text):
     return text.replace(marker, "\n", 1)
 
 
+def with_peel_check(text):
+    old = 'if [ "$(git cat-file -t "$base" 2>/dev/null)" = "commit" ]; then'
+    new = 'if git cat-file -e "$base^{commit}" >/dev/null 2>&1; then'
+    if text.count(old) != 1:
+        return None
+    return text.replace(old, new, 1)
+
+
 def run_base_sha_suite(script_path):
     env = os.environ.copy()
     env.pop("HOUSE_RULES_DISABLE", None)
@@ -86,8 +94,10 @@ def main():
             sys.stdout.write(enabled_out)
             sys.stdout.write(enabled_err)
         lines.append("| " + str(check_id) + " | " + str(disabled) + " | " + str(enabled) + " | " + ("PASS" if ok else "FAIL") + " |")
-    reverted_text = without_base_sha_guard((ROOT / "scripts" / "read-base-config.sh").read_text(encoding="utf-8"))
-    if reverted_text is None:
+    script_text = (ROOT / "scripts" / "read-base-config.sh").read_text(encoding="utf-8")
+    reverted_text = without_base_sha_guard(script_text)
+    peeled_text = with_peel_check(script_text)
+    if reverted_text is None or peeled_text is None:
         failed = True
         sys.stdout.write("base sha guard call missing\n")
         lines.append("| base-sha | missing | missing | FAIL |")
@@ -95,13 +105,19 @@ def main():
         with tempfile.TemporaryDirectory() as tmp:
             reverted_path = Path(tmp) / "read-base-config.sh"
             reverted_path.write_text(reverted_text, encoding="utf-8")
-            disabled, disabled_out, disabled_err = run_base_sha_suite(str(reverted_path))
+            removed, removed_out, removed_err = run_base_sha_suite(str(reverted_path))
+            peeled_path = Path(tmp) / "peeled.sh"
+            peeled_path.write_text(peeled_text, encoding="utf-8")
+            peeled, peeled_out, peeled_err = run_base_sha_suite(str(peeled_path))
         enabled, enabled_out, enabled_err = run_base_sha_suite("")
+        disabled = 0 if removed == 0 or peeled == 0 else 1
         ok = disabled != 0 and enabled == 0
         if not ok:
             failed = True
-            sys.stdout.write(disabled_out)
-            sys.stdout.write(disabled_err)
+            sys.stdout.write(removed_out)
+            sys.stdout.write(removed_err)
+            sys.stdout.write(peeled_out)
+            sys.stdout.write(peeled_err)
             sys.stdout.write(enabled_out)
             sys.stdout.write(enabled_err)
         lines.append("| base-sha | " + str(disabled) + " | " + str(enabled) + " | " + ("PASS" if ok else "FAIL") + " |")

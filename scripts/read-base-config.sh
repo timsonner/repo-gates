@@ -7,7 +7,9 @@ require_base_sha() {
     echo 'error: BASE_SHA must match ^[0-9a-f]{40}$' >&2
     exit 1
   fi
-  if ! git cat-file -e "$base^{commit}" >/dev/null 2>&1; then
+  if [ "$(git cat-file -t "$base" 2>/dev/null)" = "commit" ]; then
+    :
+  else
     echo 'error: BASE_SHA does not name a commit' >&2
     exit 1
   fi
