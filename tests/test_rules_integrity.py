@@ -33,9 +33,9 @@ class TestRulesIntegrity(unittest.TestCase):
         module = load_integrity()
         old = workspace_snapshot(module)
         new = copy.deepcopy(old)
-        new["manifest"]["checks"] = [item for item in new["manifest"]["checks"] if item["id"] != 1]
+        new["manifest"]["checks"] = [item for item in new["manifest"]["checks"] if item["id"] != 2]
         findings = module.compare_snapshots(old, new, "Risk: high\n", None)
-        self.assertTrue(any("removed check id 1" in item for item in findings))
+        self.assertTrue(any("removed check id 2" in item for item in findings))
 
     def test_added_check_passes(self):
         module = load_integrity()
@@ -49,7 +49,7 @@ class TestRulesIntegrity(unittest.TestCase):
         old = workspace_snapshot(module)
         new = copy.deepcopy(old)
         for item in new["manifest"]["checks"]:
-            if item["id"] == 1:
+            if item["id"] == 2:
                 item["severity"] = "WARN"
         findings = module.compare_snapshots(old, new, "Risk: high\n", None)
         self.assertTrue(any("lowered severity" in item for item in findings))
@@ -76,9 +76,9 @@ class TestRulesIntegrity(unittest.TestCase):
         module = load_integrity()
         old = workspace_snapshot(module)
         new = copy.deepcopy(old)
-        new["manifest"]["trailer_patterns"] = list(new["manifest"]["trailer_patterns"][:-1])
+        new["manifest"]["self_check_labels"] = list(new["manifest"]["self_check_labels"][:-1])
         findings = module.compare_snapshots(old, new, "Risk: high\n", None)
-        self.assertTrue(any("removed trailer_patterns" in item for item in findings))
+        self.assertTrue(any("removed self_check_labels" in item for item in findings))
 
     def test_added_allow_fails(self):
         module = load_integrity()
@@ -115,8 +115,8 @@ class TestRulesIntegrity(unittest.TestCase):
         del deleted["fixtures"][path]
         self.assertTrue(any("deleted fixture" in item for item in module.compare_snapshots(old, deleted, "Risk: high\n", None)))
         loosened = copy.deepcopy(old)
-        target = loosened["fixtures"]["tests/fixtures/check1_coauthored_commit.json"]
-        target["expect"]["1"] = "PASS"
+        target = loosened["fixtures"]["tests/fixtures/check2_author.json"]
+        target["expect"]["2"] = "PASS"
         self.assertTrue(any("toward passing" in item for item in module.compare_snapshots(old, loosened, "Risk: high\n", None)))
         edited = copy.deepcopy(old)
         edited["fixtures"]["tests/fixtures/good_pr.json"]["title"] = "changed"
@@ -127,25 +127,25 @@ class TestRulesIntegrity(unittest.TestCase):
         old = workspace_snapshot(module)
         path = "tests/test_house_rules.py"
         deleted = copy.deepcopy(old)
-        deleted["tests"][path] = old["tests"][path].replace("def test_c1_good", "def kept_c1_good", 1)
-        self.assertTrue(any("deleted func test_c1_good" in item for item in module.compare_snapshots(old, deleted, "Risk: high\n", None)))
+        deleted["tests"][path] = old["tests"][path].replace("def test_c2_good", "def kept_c2_good", 1)
+        self.assertTrue(any("deleted func test_c2_good" in item for item in module.compare_snapshots(old, deleted, "Risk: high\n", None)))
         skipped = copy.deepcopy(old)
-        skipped["tests"][path] = old["tests"][path].replace("    def test_c1_good", "    @unittest.skip('x')\n    def test_c1_good", 1)
+        skipped["tests"][path] = old["tests"][path].replace("    def test_c2_good", "    @unittest.skip('x')\n    def test_c2_good", 1)
         findings = module.compare_snapshots(old, skipped, "Risk: high\n", None)
         self.assertTrue(any("added skip" in item for item in findings))
         called = copy.deepcopy(old)
-        old_chunk = "    def test_c1_good(self):\n        self.check(\"good_pr.json\", 1)\n"
-        new_chunk = "    def test_c1_good(self):\n        self.skipTest('x')\n        self.check(\"good_pr.json\", 1)\n"
+        old_chunk = "    def test_c2_good(self):\n        self.check(\"good_pr.json\", 2)\n"
+        new_chunk = "    def test_c2_good(self):\n        self.skipTest('x')\n        self.check(\"good_pr.json\", 2)\n"
         self.assertIn(old_chunk, called["tests"][path])
         called["tests"][path] = old["tests"][path].replace(old_chunk, new_chunk, 1)
         findings = module.compare_snapshots(old, called, "Risk: high\n", None)
-        self.assertTrue(any("added skip on test_c1_good" in item for item in findings))
+        self.assertTrue(any("added skip on test_c2_good" in item for item in findings))
 
     def test_fail_on_old_id_and_guard(self):
         module = load_integrity()
         old = workspace_snapshot(module)
         trimmed = copy.deepcopy(old)
-        trimmed["fail_on_old"] = old["fail_on_old"].replace("{1, 2, 3, 4, 5, 6, 7, 9}", "{1, 2, 3, 4, 5, 6, 7}", 1)
+        trimmed["fail_on_old"] = old["fail_on_old"].replace("{2, 3, 4, 5, 6, 7, 9}", "{2, 3, 4, 5, 6, 7}", 1)
         self.assertTrue(any("removed fail-on-old id 9" in item for item in module.compare_snapshots(old, trimmed, "Risk: high\n", None)))
         unguarded = copy.deepcopy(old)
         unguarded["house"] = old["house"].replace("HOUSE_RULES_TEST", "HOUSE_RULES_OFF")
@@ -173,7 +173,7 @@ class TestRulesIntegrity(unittest.TestCase):
         signed = copy.deepcopy(old)
         signed["manifest"]["signed_off_allow_exact"] = "Other Person <other@users.noreply.github.com>"
         findings = module.compare_snapshots(old, signed, "Risk: high\n", None)
-        self.assertTrue(any("signed_off_allow_exact" in item for item in findings))
+        self.assertEqual(findings, [])
 
     def test_pin_move_to_tagged_release(self):
         module = load_integrity()

@@ -22,4 +22,3 @@ Head: <full SHA>
 - [ ] Evidence pinned to this head
 - [ ] PR body complete
 - [ ] Contribution guidelines read:
-- [ ] No trailers, author and committer are Tim

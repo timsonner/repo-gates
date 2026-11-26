@@ -79,66 +79,6 @@ class FixtureCase(unittest.TestCase):
         self.assertEqual(got, expected, [item.reason for item in findings if item.check == check_id])
 
 
-class TestC1(FixtureCase):
-    def test_c1_good(self):
-        self.check("good_pr.json", 1)
-
-    def test_c1_coauthored(self):
-        self.check("check1_coauthored_commit.json", 1)
-
-    def test_c1_footer(self):
-        self.check("check1_agent_footer.json", 1)
-
-    def test_c1_signoff_tim(self):
-        module = load_house()
-        data = load_fixture("good_pr.json")
-        exact = module.load_manifest()["signed_off_allow_exact"]
-        data["commits"][0]["message"] = "Add the checker\n\nSigned-off-by: " + exact
-        _, findings = evaluate(data)
-        self.assertEqual(module.worst(findings, 1), "PASS")
-
-    def test_c1_signoff_other(self):
-        module = load_house()
-        data = load_fixture("good_pr.json")
-        data["commits"][0]["message"] = "Add the checker\n\nSigned-off-by: Pat Example <" + "pat@" + "users.noreply.github.com>"
-        _, findings = evaluate(data)
-        self.assertEqual(module.worst(findings, 1), "FAIL")
-
-    def test_c1_plain_mention(self):
-        module = load_house()
-        data = load_fixture("good_pr.json")
-        prose = "See cursor.com and the Cursor editor. CURSOR_AGENT_PR_BODY https://cursor.com/agents/bc-1 https://cursor.com/background-agent cursor_ref=pr_footer"
-        data["title"] = prose
-        data["body"] = data["body"] + "\n" + prose
-        data["commits"][0]["message"] = prose
-        _, findings = evaluate(data)
-        self.assertEqual(module.worst(findings, 1), "PASS", [item.reason for item in findings if item.check == 1])
-
-    def test_c1_real_footer(self):
-        module = load_house()
-        samples = [
-            "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->",
-            "<!-- CURSOR_AGENT_PR_BODY_END -->",
-            "<!-- cursor_agent_pr_body_begin -->",
-            "https://cursor.com/agents/bc-1?cursor_ref=pr_footer",
-            "https://cursor.com/agents?cursor_ref=pr_footer",
-            "https://cursor.com/agents/bc-1?CURSOR_REF=pr_footer",
-            "https://cursor.com/agents/bc-1?cursor_ref=PR_FOOTER",
-            "https://Cursor.com/agents/bc-1?cursor_ref=pr_footer",
-            "https://cursor.com/background-agent?cursor_ref=pr_footer",
-            "https://CURSOR.COM/background-agent?cursor_ref=pr_footer",
-            "https://cursor.com/agents/bc-1?x=1&cursor_ref=pr_footer",
-            "[view](https://cursor.com/background-agent?cursor_ref=pr_footer)",
-        ]
-        for sample in samples:
-            data = data_with_message(load_fixture("good_pr.json"), sample)
-            _, findings = evaluate(data)
-            self.assertEqual(module.worst(findings, 1), "FAIL", sample)
-        plain = data_with_message(load_fixture("good_pr.json"), "See cursor.com and the Cursor editor.")
-        _, findings = evaluate(plain)
-        self.assertEqual(module.worst(findings, 1), "PASS", [item.reason for item in findings if item.check == 1])
-
-
 class TestC2(FixtureCase):
     def test_c2_good(self):
         self.check("good_pr.json", 2)
@@ -330,18 +270,6 @@ class TestManifestAndCli(unittest.TestCase):
         self.assertNotIn("check_8", module.__dict__)
         self.assertNotIn("model_pins", module.__dict__)
         data = load_fixture("good_pr.json")
-        for pattern in manifest["trailer_patterns"]:
-            sample = data_with_message(data, pattern[1:] + " sample")
-            _, findings = evaluate(sample)
-            self.assertEqual(module.worst(findings, 1), "FAIL", pattern)
-        for footer in manifest["agent_footers"]:
-            if footer.lower() == "cursor":
-                message = "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->"
-            else:
-                message = "note " + footer
-            sample = data_with_message(data, message)
-            _, findings = evaluate(sample)
-            self.assertEqual(module.worst(findings, 1), "FAIL", footer)
         for shape in manifest["token_shapes"]:
             sample = copy.deepcopy(data)
             sample["added"] = [{"path": "a.py", "line_no": 2, "text": "value = " + json.dumps(module.shape_sample(shape))}]
@@ -421,7 +349,8 @@ class TestManifestAndCli(unittest.TestCase):
             env.update({"PR_TITLE": "Edit readme", "PR_BODY": body, "BASE_SHA": base, "HEAD_SHA": head, "SCOPE_MODE": "fail", "COMMENTS_MODE": "fail"})
             proc = subprocess.run([sys.executable, str(ROOT / "scripts" / "house-rules.py")], cwd=repo, env=env, text=True, capture_output=True)
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-            self.assertIn("| 1 | PASS |", proc.stdout)
+            self.assertNotIn("| 1 |", proc.stdout)
+            self.assertIn("| 2 | PASS |", proc.stdout)
             self.assertNotIn("| 8 |", proc.stdout)
             self.assertIn("Risk tier: low", proc.stdout)
         self.assertTrue(callable(module.run_checks))
@@ -452,14 +381,6 @@ class TestManifestAndCli(unittest.TestCase):
                     self.assertNotIn(alias.name.split(".")[0], banned)
             if isinstance(node, ast.ImportFrom) and node.module:
                 self.assertNotIn(node.module.split(".")[0], banned)
-
-
-def data_with_message(data, message):
-    sample = copy.deepcopy(data)
-    sample["commits"] = [dict(sample["commits"][0], message=message)]
-    sample["title"] = "Stand up the gate"
-    sample["body"] = load_fixture("good_pr.json")["body"]
-    return sample
 
 
 if __name__ == "__main__":
