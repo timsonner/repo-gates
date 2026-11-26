@@ -104,6 +104,31 @@ class TestC1(FixtureCase):
         _, findings = evaluate(data)
         self.assertEqual(module.worst(findings, 1), "FAIL")
 
+    def test_c1_plain_mention(self):
+        module = load_house()
+        data = load_fixture("good_pr.json")
+        prose = "See cursor.com and the Cursor editor. CURSOR_AGENT_PR_BODY https://cursor.com/agents/bc-1 https://cursor.com/background-agent cursor_ref=pr_footer"
+        data["title"] = prose
+        data["body"] = data["body"] + "\n" + prose
+        data["commits"][0]["message"] = prose
+        _, findings = evaluate(data)
+        self.assertEqual(module.worst(findings, 1), "PASS", [item.reason for item in findings if item.check == 1])
+
+    def test_c1_real_footer(self):
+        module = load_house()
+        samples = [
+            "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->",
+            "<!-- CURSOR_AGENT_PR_BODY_END -->",
+            "https://cursor.com/agents/bc-1?cursor_ref=pr_footer",
+            "https://cursor.com/background-agent?cursor_ref=pr_footer",
+            "https://cursor.com/agents/bc-1?x=1&cursor_ref=pr_footer",
+            "[view](https://cursor.com/background-agent?cursor_ref=pr_footer)",
+        ]
+        for sample in samples:
+            data = data_with_message(load_fixture("good_pr.json"), sample)
+            _, findings = evaluate(data)
+            self.assertEqual(module.worst(findings, 1), "FAIL", sample)
+
 
 class TestC2(FixtureCase):
     def test_c2_good(self):
@@ -240,6 +265,40 @@ class TestC7(FixtureCase):
         _, findings = evaluate(data)
         self.assertEqual(module.worst(findings, 7), "WARN")
 
+    def shell_level(self, text):
+        module = load_house()
+        data = load_fixture("good_pr.json")
+        data["added"] = [{"path": "run.sh", "line_no": 3, "text": text}]
+        data["files"] = ["run.sh"]
+        data["comments_mode"] = "warn"
+        _, findings = evaluate(data)
+        return module.worst(findings, 7)
+
+    def test_c7_shell_shortest_prefix(self):
+        marker = chr(35)
+        self.assertEqual(self.shell_level("base=${name" + marker + "prefix}"), "PASS")
+
+    def test_c7_shell_longest_prefix(self):
+        marker = chr(35)
+        self.assertEqual(self.shell_level("base=${name" + marker + marker + "*/}"), "PASS")
+
+    def test_c7_shell_argc(self):
+        marker = chr(35)
+        self.assertEqual(self.shell_level("count=$" + marker), "PASS")
+
+    def test_c7_shell_nonspace(self):
+        marker = chr(35)
+        self.assertEqual(self.shell_level("echo hello" + marker + "world"), "PASS")
+
+    def test_c7_shell_trailing_comment(self):
+        marker = chr(35)
+        self.assertEqual(self.shell_level("echo done " + marker + " note"), "WARN")
+        self.assertEqual(self.shell_level("base=${name" + marker + "prefix} " + marker + " note"), "WARN")
+
+    def test_c7_shell_line_comment(self):
+        marker = chr(35)
+        self.assertEqual(self.shell_level(marker + " note"), "WARN")
+
 
 class TestC9(FixtureCase):
     def test_c9_good(self):
@@ -267,7 +326,11 @@ class TestManifestAndCli(unittest.TestCase):
             _, findings = evaluate(sample)
             self.assertEqual(module.worst(findings, 1), "FAIL", pattern)
         for footer in manifest["agent_footers"]:
-            sample = data_with_message(data, "note " + footer)
+            if footer.lower() == "cursor":
+                message = "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->"
+            else:
+                message = "note " + footer
+            sample = data_with_message(data, message)
             _, findings = evaluate(sample)
             self.assertEqual(module.worst(findings, 1), "FAIL", footer)
         for shape in manifest["token_shapes"]:
