@@ -143,13 +143,21 @@ def commit_as(repo, name, email, message):
 
 
 def read_base_config(repo, base):
-    house = step_run((ROOT / ".github" / "workflows" / "house-rules.yml").read_text(encoding="utf-8"), "read base repo-gates config")
-    trusted = step_run((ROOT / ".github" / "workflows" / "trusted-gate.yml").read_text(encoding="utf-8"), "read base repo-gates config")
-    if house != trusted:
-        raise AssertionError("config read scripts differ")
-    if 'git show "$BASE_SHA:.github/repo-gates.json"' not in house:
+    house_text = (ROOT / ".github" / "workflows" / "house-rules.yml").read_text(encoding="utf-8")
+    trusted_text = (ROOT / ".github" / "workflows" / "trusted-gate.yml").read_text(encoding="utf-8")
+    house = step_run(house_text, "read base repo-gates config")
+    trusted = step_run(trusted_text, "read base repo-gates config")
+    script_path = ROOT / "scripts" / "read-base-config.sh"
+    script = script_path.read_text(encoding="utf-8")
+    if "bash .repo-gates/scripts/read-base-config.sh" not in house:
+        raise AssertionError("caller config read is not the pinned script")
+    if "bash .trusted/scripts/read-base-config.sh" not in trusted:
+        raise AssertionError("trusted config read is not the pinned script")
+    if 'git show "$BASE_SHA:.github/repo-gates.json"' not in script:
         raise AssertionError("base config read is missing")
-    if "HEAD_SHA:.github/repo-gates.json" in house:
+    if "\nrequire_base_sha\n" not in script or script.index("\nrequire_base_sha\n") > script.index('git show "$BASE_SHA:.github/repo-gates.json"'):
+        raise AssertionError("base config read runs before the guard")
+    if "HEAD_SHA:.github/repo-gates.json" in script or "HEAD_SHA:.github/repo-gates.json" in house or "HEAD_SHA:.github/repo-gates.json" in trusted:
         raise AssertionError("config read uses head")
     out = Path(repo) / "github-output.txt"
     if out.exists():
@@ -160,7 +168,7 @@ def read_base_config(repo, base):
     env["BASE_SHA"] = base
     env["RUNNER_TEMP"] = str(temp)
     env["GITHUB_OUTPUT"] = str(out)
-    proc = subprocess.run(["bash", "-c", house], cwd=repo, env=env, text=True, capture_output=True)
+    proc = subprocess.run(["bash", str(script_path)], cwd=repo, env=env, text=True, capture_output=True)
     if proc.returncode != 0:
         raise AssertionError(proc.stdout + proc.stderr)
     path = ""

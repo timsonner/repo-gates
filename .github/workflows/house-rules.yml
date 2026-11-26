@@ -51,13 +51,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          dest="$RUNNER_TEMP/repo-gates.json"
-          if git cat-file -e "$BASE_SHA:.github/repo-gates.json" 2>/dev/null; then
-            git show "$BASE_SHA:.github/repo-gates.json" > "$dest"
-            echo "path=$dest" >> "$GITHUB_OUTPUT"
-          else
-            echo "path=" >> "$GITHUB_OUTPUT"
-          fi
+          bash .repo-gates/scripts/read-base-config.sh
       - name: run house rules
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -68,4 +62,7 @@ jobs:
           COMMENTS_MODE: ${{ inputs.comments_mode }}
           ALLOWED_AUTHORS: ${{ inputs.allowed_authors }}
           REPO_GATES_CONFIG: ${{ steps.repoconfig.outputs.path }}
-        run: python3 .repo-gates/scripts/house-rules.py
+        run: |
+          set -euo pipefail
+          bash .repo-gates/scripts/read-base-config.sh --check
+          python3 .repo-gates/scripts/house-rules.py
