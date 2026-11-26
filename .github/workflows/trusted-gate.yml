@@ -22,6 +22,8 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          set -euo pipefail
+          bash scripts/read-base-config.sh --check
           sha=$(grep -o '"sha"[[:space:]]*:[[:space:]]*"[^"]*"' .github/trusted-gates.json | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
           if [ "$sha" = "bootstrap" ]; then
             sha="$BASE_SHA"
@@ -45,13 +47,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          dest="$RUNNER_TEMP/repo-gates.json"
-          if git cat-file -e "$BASE_SHA:.github/repo-gates.json" 2>/dev/null; then
-            git show "$BASE_SHA:.github/repo-gates.json" > "$dest"
-            echo "path=$dest" >> "$GITHUB_OUTPUT"
-          else
-            echo "path=" >> "$GITHUB_OUTPUT"
-          fi
+          bash .trusted/scripts/read-base-config.sh
       - name: run house rules
         id: run
         env:
@@ -64,8 +60,12 @@ jobs:
           REPO_GATES_CONFIG: ${{ steps.repoconfig.outputs.path }}
         run: |
           set +e
-          python3 .trusted/scripts/house-rules.py
+          bash .trusted/scripts/read-base-config.sh --check
           code=$?
+          if [ "$code" -eq 0 ]; then
+            python3 .trusted/scripts/house-rules.py
+            code=$?
+          fi
           set -e
           echo "code=$code" >> "$GITHUB_OUTPUT"
       - name: post house rules status
@@ -98,6 +98,8 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          set -euo pipefail
+          bash scripts/read-base-config.sh --check
           sha=$(grep -o '"sha"[[:space:]]*:[[:space:]]*"[^"]*"' .github/trusted-gates.json | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
           if [ "$sha" = "bootstrap" ]; then
             sha="$BASE_SHA"
@@ -138,8 +140,12 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set +e
-          python3 .trusted/scripts/rules-integrity.py
+          bash .trusted/scripts/read-base-config.sh --check
           code=$?
+          if [ "$code" -eq 0 ]; then
+            python3 .trusted/scripts/rules-integrity.py
+            code=$?
+          fi
           set -e
           echo "code=$code" >> "$GITHUB_OUTPUT"
       - name: post rules integrity status
