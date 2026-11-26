@@ -12,6 +12,12 @@ ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_PATH = ROOT / "rules" / "manifest.json"
 HASH = chr(35)
 EM = "\u2014"
+AGENT_FOOTER_EXACT = (
+    re.compile(r"<!--\s*CURSOR_AGENT_PR_BODY_BEGIN\s*-->", re.IGNORECASE),
+    re.compile(r"<!--\s*CURSOR_AGENT_PR_BODY_END\s*-->", re.IGNORECASE),
+    re.compile(r"cursor\.com/agents[/?]\S*cursor_ref=pr_footer", re.IGNORECASE),
+    re.compile(r"cursor\.com/background-agent[/?]\S*cursor_ref=pr_footer", re.IGNORECASE),
+)
 
 DISPATCH = {
     1: "check_trailers",
@@ -268,6 +274,15 @@ def texts_for_trailers(ctx):
     return items
 
 
+def matches_agent_footer(text, footer):
+    if footer.lower() == "cursor":
+        for pattern in AGENT_FOOTER_EXACT:
+            if pattern.search(text):
+                return True
+        return False
+    return footer.lower() in text.lower()
+
+
 def check_trailers(ctx):
     if gate(ctx, 1):
         return []
@@ -288,7 +303,7 @@ def check_trailers(ctx):
                     found.append(Finding(1, level, label + " matches " + pattern))
                     break
             for footer in ctx.manifest["agent_footers"]:
-                if footer.lower() in stripped.lower():
+                if matches_agent_footer(stripped, footer):
                     found.append(Finding(1, level, label + " has agent footer " + footer))
                     break
     return found
@@ -413,10 +428,11 @@ def check_risk_tier(ctx):
     return []
 
 
-def hash_comment_at(text, triples=False):
+def hash_comment_at(text, triples=False, shell=False):
     quote = ""
     triple = False
     escaped = False
+    brace = 0
     index = 0
     length = len(text)
     while index < length:
@@ -447,8 +463,20 @@ def hash_comment_at(text, triples=False):
             escaped = False
             index += 1
             continue
-        if ch == HASH and (index == 0 or text[index - 1] not in ("$", "{")):
-            return index
+        if shell and ch == "$" and index + 1 < length and text[index + 1] == "{":
+            brace += 1
+            index += 2
+            continue
+        if shell and ch == "}" and brace:
+            brace -= 1
+            index += 1
+            continue
+        if ch == HASH:
+            if shell:
+                if brace == 0 and (index == 0 or text[index - 1].isspace()):
+                    return index
+            elif index == 0 or text[index - 1] not in ("$", "{"):
+                return index
         index += 1
     return None
 
@@ -507,7 +535,7 @@ def comment_slice(text, suffix):
     if suffix == ".py":
         index = python_comment_at(text)
     elif suffix in {".sh", ".nix"}:
-        index = hash_comment_at(text)
+        index = hash_comment_at(text, shell=(suffix == ".sh"))
     elif suffix in {".rs", ".js", ".ts", ".go", ".swift"}:
         index = slash_comment_at(text, suffix)
     else:
