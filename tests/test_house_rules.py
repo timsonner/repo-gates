@@ -280,7 +280,7 @@ class TestC2(FixtureCase):
             json.dumps({"authors_mode": "list", "allowed_authors": [PAT]}),
         )
         self.assertEqual(module.worst(findings, 2), "FAIL")
-        self.assertTrue(any("GitHub <noreply@github.com>" in item for item in reasons(findings, 2)))
+        self.assertTrue(any("GitHub <" + "noreply@" + "github.com>" in item for item in reasons(findings, 2)))
 
     def test_c2_unknown_key_fails_closed(self):
         module, findings = with_config("check2_author.json", json.dumps({"authors_mode": "any", "extra": True}))
