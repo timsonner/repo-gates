@@ -1,0 +1,33 @@
+{
+  "title": "Stand up the gate",
+  "body": "## Plan\n- Goal:\n- Scope (paths):\n- Steps:\n- Success criteria:\n- Risk: low | medium | high\n- Plan file: (box spec path or \"n/a\")\n\n## Evidence\nHead: <full SHA>\n- Commands and exit codes (fmt, lint -D warnings, tests, proof scripts):\n- Workflow runs / artifacts:\n- Fail-on-old proof (for new or changed tests):\n\n## Risk and rollback\n- Risks:\n- Rollback:\n\n## Self-check (pr-review-gate)\n- [ ] Fail-on-old proof\n- [ ] Raw timing tries kept (if timing work)\n- [ ] Evidence pinned to this head\n- [ ] PR body complete\n- [ ] Contribution guidelines read:\n- [ ] No trailers, author and committer are Tim\n",
+  "commits": [
+    {
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "author_name": "Tim Sonner",
+      "author_email": "66705347+timsonner@users.noreply.github.com",
+      "committer_name": "Tim Sonner",
+      "committer_email": "66705347+timsonner@users.noreply.github.com",
+      "message": "Add the checker"
+    }
+  ],
+  "files": [
+    "README.md"
+  ],
+  "added": [
+    {
+      "path": "README.md",
+      "line_no": 1,
+      "text": "hello"
+    }
+  ],
+  "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "scope_mode": "fail",
+  "comments_mode": "warn",
+  "allowed_authors": "",
+  "mutations": [],
+  "id": "template-body",
+  "expect": {
+    "4": "FAIL"
+  }
+}

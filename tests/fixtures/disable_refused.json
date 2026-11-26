@@ -1,0 +1,8 @@
+{
+  "id": "disable-refused",
+  "env": {
+    "GITHUB_ACTIONS": "true",
+    "HOUSE_RULES_DISABLE": "1"
+  },
+  "expect_exit": 2
+}

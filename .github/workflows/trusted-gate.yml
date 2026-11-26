@@ -1,0 +1,144 @@
+name: trusted-gate
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+jobs:
+  house-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: checkout base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: resolve pin
+        id: pin
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          sha=$(grep -o '"sha"[[:space:]]*:[[:space:]]*"[^"]*"' .github/trusted-gates.json | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
+          if [ "$sha" = "bootstrap" ]; then
+            sha="$BASE_SHA"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: checkout trusted
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: timsonner/repo-gates
+          ref: ${{ steps.pin.outputs.sha }}
+          path: .trusted
+          persist-credentials: false
+      - name: fetch head data
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags https://github.com/timsonner/repo-gates.git "$HEAD_SHA"
+      - name: run house rules
+        id: run
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SCOPE_MODE: fail
+          COMMENTS_MODE: fail
+        run: |
+          set +e
+          python3 .trusted/scripts/house-rules.py
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+      - name: post house rules status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CODE: ${{ steps.run.outputs.code }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$CODE" = "0" ]; then
+            state=success
+          else
+            state=failure
+          fi
+          gh api --method POST -H "Accept: application/vnd.github+json" "/repos/$REPO/statuses/$HEAD_SHA" -f state="$state" -f context="trusted/house-rules" -f description="house-rules exit $CODE"
+  rules-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: checkout base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: resolve pin
+        id: pin
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          sha=$(grep -o '"sha"[[:space:]]*:[[:space:]]*"[^"]*"' .github/trusted-gates.json | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
+          if [ "$sha" = "bootstrap" ]; then
+            sha="$BASE_SHA"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: checkout trusted
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: timsonner/repo-gates
+          ref: ${{ steps.pin.outputs.sha }}
+          path: .trusted
+          persist-credentials: false
+      - name: fetch head data
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags https://github.com/timsonner/repo-gates.git "$HEAD_SHA"
+      - name: fetch pinned tag
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          tag=$(git show "$HEAD_SHA:.github/trusted-gates.json" | grep -o '"tag"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
+          case "$tag" in
+            ""|bootstrap|*[!A-Za-z0-9._-]*)
+              ;;
+            *)
+              git fetch https://github.com/timsonner/repo-gates.git "refs/tags/${tag}:refs/tags/${tag}"
+              ;;
+          esac
+      - name: run rules integrity
+        id: run
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TRUSTED_DIR: ${{ github.workspace }}/.trusted
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          python3 .trusted/scripts/rules-integrity.py
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+      - name: post rules integrity status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CODE: ${{ steps.run.outputs.code }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$CODE" = "0" ]; then
+            state=success
+          else
+            state=failure
+          fi
+          gh api --method POST -H "Accept: application/vnd.github+json" "/repos/$REPO/statuses/$HEAD_SHA" -f state="$state" -f context="trusted/rules-integrity" -f description="rules-integrity exit $CODE"
