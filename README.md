@@ -8,7 +8,7 @@ Pull requests in this repo are not graded by the code in the pull request head. 
 
 | Check | Name | Result when it fires |
 | --- | --- | --- |
-| 2 | Author and committer identity | FAIL |
+| 2 | Author and committer identity | FAIL in owner and list mode. any passes. WARN when .github/repo-gates.json changes |
 | 3 | Em dash in title, body, and commits; em dash on an added markdown line | FAIL, and WARN for markdown |
 | 4 | Pull request body content and changed-file scope | FAIL, scope follows scope_mode |
 | 5 | Evidence Head pin | FAIL |
@@ -18,6 +18,31 @@ Pull requests in this repo are not graded by the code in the pull request head. 
 | 9 | Token shapes and non-noreply emails | WARN |
 
 Checks 1 and 8 are not implemented. The summary has no row 1 or row 8.
+
+## Repos with other contributors
+
+Consumer repos can allow more authors than the manifest identity. Commit `.github/repo-gates.json` on the default branch. The gate reads that file from the pull request base commit and passes the contents to `scripts/house-rules.py` as `REPO_GATES_CONFIG`. The head copy does not change who is allowed on that pull request. A missing file selects owner mode. A pull request that changes the file gets a WARN finding, `repo-gates config changed`.
+
+`authors_mode` is one of three values.
+
+- `owner` allows the manifest identity plus the caller workflow `allowed_authors` input. This is the default.
+- `list` allows that owner identity plus each entry in `allowed_authors`. The caller workflow input is merged into the list.
+- `any` does not check author or committer identity. Check 2 passes with no warning when the file itself is unchanged.
+
+The owner identity stays allowed in `owner` and `list` mode. It is Tim Sonner <66705347+timsonner@users.noreply.github.com>.
+
+```json
+{
+  "authors_mode": "list",
+  "allowed_authors": [
+    "Ada Lovelace <1+ada@users.noreply.github.com>"
+  ]
+}
+```
+
+Unknown keys or bad values fail check 2. The checker keeps owner mode when it cannot parse the file.
+
+Upstream repos Tim does not own do not run these gates. Contributions there follow each project's own guidelines.
 
 ## Adopt this in a repository
 

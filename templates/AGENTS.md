@@ -3,7 +3,8 @@
 These rules apply to every author: any coding agent, whatever tool runs it, and humans.
 
 - Work on a branch and open a PR. Never push to the default branch.
-- Git author and committer: Tim Sonner <66705347+timsonner@users.noreply.github.com>.
+- Commits must match the repo's repo-gates config. Owner-only repos author as Tim Sonner <66705347+timsonner@users.noreply.github.com>.
+- Upstream repos Tim does not own do not run these gates. Contributions there follow each project's own guidelines.
 - Before every push: format, lint with warnings as errors, and all tests green on that exact head, rebased on current main.
 - Fill every section of the PR template with real content. Evidence must name the current head SHA. The house-rules check reads the PR body.
 - No em dashes in prose.

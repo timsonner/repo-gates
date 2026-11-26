@@ -242,6 +242,9 @@ class TestRulesIntegrity(unittest.TestCase):
         self.assertIn("fetch-tags: true", text)
         self.assertIn("refs/tags/", text)
         self.assertIn("GITHUB_TOKEN:", text)
+        self.assertIn('git show "$BASE_SHA:.github/repo-gates.json"', text)
+        self.assertIn("REPO_GATES_CONFIG:", text)
+        self.assertNotIn("HEAD_SHA:.github/repo-gates.json", text)
         blocks = checkout_blocks(text)
         self.assertGreaterEqual(len(blocks), 2)
         for block in blocks:
@@ -265,6 +268,9 @@ class TestRulesIntegrity(unittest.TestCase):
         self.assertNotIn("write", text)
         self.assertNotIn("pull_request_target", text)
         self.assertIn("python3 .repo-gates/scripts/house-rules.py", text)
+        self.assertIn('git show "$BASE_SHA:.github/repo-gates.json"', text)
+        self.assertIn("REPO_GATES_CONFIG:", text)
+        self.assertNotIn("HEAD_SHA:.github/repo-gates.json", text)
         for block in run_blocks(text):
             self.assertNotIn("github.event.pull_request.title", block)
             self.assertNotIn("github.event.pull_request.body", block)
