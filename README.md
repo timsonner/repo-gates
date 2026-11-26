@@ -14,7 +14,7 @@ Pull requests in this repo are not graded by the code in the pull request head. 
 | 4 | Pull request body content and changed-file scope | FAIL, scope follows scope_mode |
 | 5 | Evidence Head pin | FAIL |
 | 6 | Workflow edits require risk high | FAIL |
-| 7 | New comments | WARN, or FAIL when comments_mode is fail |
+| 7 | New comments, including a trailing comment on an added line | WARN, or FAIL when comments_mode is fail |
 | 8 | Model pins | dropped |
 | 9 | Token shapes and non-noreply emails | WARN |
 
@@ -48,7 +48,7 @@ Callers pin a full SHA. The workflow `uses` line does not float on a tag. The bo
 python3 tools/post-verdict.py --repo owner/name --sha <40 hex> --state success --description "short text" --pr <number>
 ```
 
-The default key path is `/workspace/secrets/repo-gates/timsonner-gates.private-key.pem`. The default app id is `GATES_APP_ID` in `/workspace/secrets/repo-gates/app.env`. On this repo, a success verdict is refused unless `trusted/house-rules` and `trusted/rules-integrity` are both success on that exact sha, posted by GitHub Actions, exactly once each, and no other workflow declares a `trusted/`, `release/`, or `gate/` context. The script prints the status id, state, and URL. It does not print the token.
+The default key path is `/workspace/secrets/repo-gates/timsonner-gates.private-key.pem`. The default app id is `GATES_APP_ID` in `/workspace/secrets/repo-gates/app.env`. `--pr` is required. The command refuses unless `--sha` is the current head of that pull request. On this repo, a success verdict is refused unless `trusted/house-rules` and `trusted/rules-integrity` are both success on that exact sha, posted by GitHub Actions, exactly once each, and no other workflow declares a `trusted/`, `release/`, or `gate/` context. The script prints the status id, state, and URL. It does not print the token.
 
 The first post on a repo needs Tim's OK.
 

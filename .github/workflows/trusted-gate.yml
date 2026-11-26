@@ -77,6 +77,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
       - name: resolve pin
         id: pin
@@ -100,6 +101,18 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           git fetch --no-tags https://github.com/timsonner/repo-gates.git "$HEAD_SHA"
+      - name: fetch pinned tag
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          tag=$(git show "$HEAD_SHA:.github/trusted-gates.json" | grep -o '"tag"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
+          case "$tag" in
+            ""|bootstrap|*[!A-Za-z0-9._-]*)
+              ;;
+            *)
+              git fetch https://github.com/timsonner/repo-gates.git "refs/tags/${tag}:refs/tags/${tag}"
+              ;;
+          esac
       - name: run rules integrity
         id: run
         env:
@@ -108,6 +121,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TRUSTED_DIR: ${{ github.workspace }}/.trusted
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set +e
           python3 .trusted/scripts/rules-integrity.py

@@ -76,7 +76,9 @@ def validate(args):
         return "state must be success, failure, or pending"
     if not isinstance(args.description, str) or args.description == "" or len(args.description) > 140:
         return "description must be 1 to 140 characters"
-    if args.pr is not None and args.pr <= 0:
+    if args.pr is None:
+        return "pr is required"
+    if args.pr <= 0:
         return "pr must be a positive integer"
     return ""
 
@@ -157,12 +159,11 @@ def post(args, http, signer=None, now=None, app_id=None, api_base=API_BASE):
         sys.stderr.write(problem + "\n")
         return 2
     owner, repo = args.repo.split("/", 1)
-    if args.pr is not None:
-        pr = get_json(http, "GET", api_base + "/repos/" + owner + "/" + repo + "/pulls/" + str(args.pr), {"Accept": "application/vnd.github+json", "User-Agent": "repo-gates"})
-        head = ((pr.get("head") or {}).get("sha")) or ""
-        if head.lower() != args.sha.lower():
-            sys.stderr.write("stale head\n")
-            return 3
+    pr = get_json(http, "GET", api_base + "/repos/" + owner + "/" + repo + "/pulls/" + str(args.pr), {"Accept": "application/vnd.github+json", "User-Agent": "repo-gates"})
+    head = ((pr.get("head") or {}).get("sha")) or ""
+    if head.lower() != args.sha.lower():
+        sys.stderr.write("stale head\n")
+        return 3
     if args.state == "success":
         statuses = get_json(http, "GET", api_base + "/repos/" + owner + "/" + repo + "/commits/" + args.sha + "/statuses", {"Accept": "application/vnd.github+json", "User-Agent": "repo-gates"})
         if needs_trusted(owner, repo, statuses):
@@ -197,7 +198,7 @@ def build_parser():
     parser.add_argument("--state", required=True)
     parser.add_argument("--description", required=True)
     parser.add_argument("--target-url", default="")
-    parser.add_argument("--pr", type=int)
+    parser.add_argument("--pr", type=int, required=True)
     parser.add_argument("--key", default=DEFAULT_KEY)
     parser.add_argument("--app-id", default="")
     parser.add_argument("--app-env", default=DEFAULT_APP_ENV)

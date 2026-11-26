@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 import copy
 import importlib.util
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -130,6 +133,13 @@ class TestRulesIntegrity(unittest.TestCase):
         skipped["tests"][path] = old["tests"][path].replace("    def test_c1_good", "    @unittest.skip('x')\n    def test_c1_good", 1)
         findings = module.compare_snapshots(old, skipped, "Risk: high\n", None)
         self.assertTrue(any("added skip" in item for item in findings))
+        called = copy.deepcopy(old)
+        old_chunk = "    def test_c1_good(self):\n        self.check(\"good_pr.json\", 1)\n"
+        new_chunk = "    def test_c1_good(self):\n        self.skipTest('x')\n        self.check(\"good_pr.json\", 1)\n"
+        self.assertIn(old_chunk, called["tests"][path])
+        called["tests"][path] = old["tests"][path].replace(old_chunk, new_chunk, 1)
+        findings = module.compare_snapshots(old, called, "Risk: high\n", None)
+        self.assertTrue(any("added skip on test_c1_good" in item for item in findings))
 
     def test_fail_on_old_id_and_guard(self):
         module = load_integrity()
@@ -140,6 +150,68 @@ class TestRulesIntegrity(unittest.TestCase):
         unguarded = copy.deepcopy(old)
         unguarded["house"] = old["house"].replace("HOUSE_RULES_TEST", "HOUSE_RULES_OFF")
         self.assertTrue(any("HOUSE_RULES_TEST" in item for item in module.compare_snapshots(old, unguarded, "Risk: high\n", None)))
+
+    def test_manifest_identity_extensions_and_signoff(self):
+        module = load_integrity()
+        old = workspace_snapshot(module)
+        dropped = copy.deepcopy(old)
+        dropped["manifest"]["comment_extensions"] = [item for item in dropped["manifest"]["comment_extensions"] if item != ".py"]
+        findings = module.compare_snapshots(old, dropped, "Risk: high\n", None)
+        self.assertTrue(any("comment_extensions" in item for item in findings))
+        added = copy.deepcopy(old)
+        added["manifest"]["comment_extensions"] = list(added["manifest"]["comment_extensions"]) + [".css"]
+        self.assertEqual(module.compare_snapshots(old, added, "Risk: high\n", None), [])
+        changed = copy.deepcopy(old)
+        changed["manifest"]["identity"] = dict(changed["manifest"]["identity"])
+        changed["manifest"]["identity"]["email"] = "other@users.noreply.github.com"
+        findings = module.compare_snapshots(old, changed, "Risk: high\n", None)
+        self.assertTrue(any("changed identity email" in item for item in findings))
+        loose = copy.deepcopy(old)
+        loose["manifest"]["placeholders"] = [item for item in loose["manifest"]["placeholders"] if item != "TBD"]
+        findings = module.compare_snapshots(old, loose, "Risk: high\n", None)
+        self.assertTrue(any("placeholders" in item for item in findings))
+        signed = copy.deepcopy(old)
+        signed["manifest"]["signed_off_allow_exact"] = "Other Person <other@users.noreply.github.com>"
+        findings = module.compare_snapshots(old, signed, "Risk: high\n", None)
+        self.assertTrue(any("signed_off_allow_exact" in item for item in findings))
+
+    def test_pin_move_to_tagged_release(self):
+        module = load_integrity()
+        old = workspace_snapshot(module)
+        new = copy.deepcopy(old)
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.check_call(["git", "init", "-b", "main"], cwd=repo, stdout=subprocess.DEVNULL)
+            subprocess.check_call(["git", "config", "user.name", "Tim Sonner"], cwd=repo)
+            subprocess.check_call(["git", "config", "user.email", "66705347+timsonner@users.noreply.github.com"], cwd=repo)
+            subprocess.check_call(["git", "config", "commit.gpgsign", "false"], cwd=repo)
+            (repo / "README.md").write_text("hello\n", encoding="utf-8")
+            subprocess.check_call(["git", "add", "README.md"], cwd=repo)
+            subprocess.check_call(["git", "commit", "-m", "init"], cwd=repo, stdout=subprocess.DEVNULL)
+            sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+            subprocess.check_call(["git", "tag", "v1"], cwd=repo)
+            new["pin"] = {"tag": "v1", "sha": sha}
+            previous = os.getcwd()
+            saved = os.environ.get("MAIN_REF")
+            os.chdir(repo)
+            os.environ["MAIN_REF"] = "main"
+            original = module.release_status_ok
+            module.release_status_ok = lambda value: value == sha
+            try:
+                ok, reason = module.live_pin_checker(new["pin"], {"tag": "bootstrap", "sha": "bootstrap"})
+                self.assertTrue(ok, reason)
+                findings = module.compare_snapshots(old, new, "Risk: high\n", module.live_pin_checker)
+                self.assertEqual(findings, [])
+                missing_ok, missing_reason = module.live_pin_checker({"tag": "v9", "sha": sha}, {"tag": "bootstrap", "sha": "bootstrap"})
+                self.assertFalse(missing_ok)
+                self.assertTrue(missing_reason)
+            finally:
+                module.release_status_ok = original
+                if saved is None:
+                    os.environ.pop("MAIN_REF", None)
+                else:
+                    os.environ["MAIN_REF"] = saved
+                os.chdir(previous)
 
     def test_pin_and_workflows(self):
         module = load_integrity()
@@ -167,6 +239,9 @@ class TestRulesIntegrity(unittest.TestCase):
         self.assertIn(".trusted/scripts/rules-integrity.py", text)
         self.assertIn("trusted/house-rules", text)
         self.assertIn("trusted/rules-integrity", text)
+        self.assertIn("fetch-tags: true", text)
+        self.assertIn("refs/tags/", text)
+        self.assertIn("GITHUB_TOKEN:", text)
         blocks = checkout_blocks(text)
         self.assertGreaterEqual(len(blocks), 2)
         for block in blocks:

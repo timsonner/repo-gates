@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RESERVED_WORKFLOWS = {"trusted-gate.yml", "release.yml"}
 LEVEL_RANK = {"off": 0, "PASS": 0, "pass": 0, "WARN": 1, "warn": 1, "FAIL": 2, "fail": 2}
 SKIP_DECORATORS = {"skip", "skipIf", "skipUnless", "expectedFailure"}
-PATTERN_LISTS = ("trailer_patterns", "agent_footers", "self_check_labels")
+PATTERN_LISTS = ("trailer_patterns", "agent_footers", "self_check_labels", "comment_extensions", "placeholders")
 
 
 def empty_snapshot():
@@ -130,6 +130,23 @@ def decorator_name(node):
     return ""
 
 
+def call_name(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Call):
+        return call_name(node.func)
+    return ""
+
+
+def has_skip_test(node):
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call) and call_name(child) == "skipTest":
+            return True
+    return False
+
+
 def test_index(source):
     if not source:
         return {}
@@ -137,9 +154,9 @@ def test_index(source):
     found = {}
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
-            found[("func", node.name)] = set(decorators(node))
+            found[("func", node.name)] = {"decorators": set(decorators(node)), "skip_test": has_skip_test(node)}
         elif isinstance(node, ast.ClassDef) and (node.name.startswith("Test") or node.name.startswith("test_")):
-            found[("class", node.name)] = set(decorators(node))
+            found[("class", node.name)] = {"decorators": set(decorators(node)), "skip_test": False}
     return found
 
 
@@ -232,6 +249,13 @@ def compare_snapshots(old, new, body, pin_checker=None):
             if entry not in new_shapes:
                 findings.append("removed token shape")
                 break
+        old_identity = old_manifest.get("identity") or {}
+        new_identity = new_manifest.get("identity") or {}
+        for key in ("name", "email"):
+            if old_identity.get(key) != new_identity.get(key):
+                findings.append("changed identity " + key)
+        if old_manifest.get("signed_off_allow_exact") != new_manifest.get("signed_off_allow_exact"):
+            findings.append("changed signed_off_allow_exact")
         old_limits = old_manifest.get("limits", {})
         new_limits = new_manifest.get("limits", {})
         for key, old_value in old_limits.items():
@@ -268,12 +292,13 @@ def compare_snapshots(old, new, body, pin_checker=None):
             continue
         old_tests = test_index(source)
         new_tests = test_index(new["tests"][path])
-        for key, old_decs in old_tests.items():
+        for key, old_info in old_tests.items():
             if key not in new_tests:
                 findings.append("deleted " + key[0] + " " + key[1])
                 continue
-            added = new_tests[key] - old_decs
-            if added & SKIP_DECORATORS:
+            new_info = new_tests[key]
+            added = new_info["decorators"] - old_info["decorators"]
+            if added & SKIP_DECORATORS or (new_info["skip_test"] and not old_info["skip_test"]):
                 findings.append("added skip on " + key[1])
     if old.get("house") and "HOUSE_RULES_TEST" in old["house"] and "HOUSE_RULES_TEST" not in (new.get("house") or ""):
         findings.append("removed HOUSE_RULES_TEST guard")

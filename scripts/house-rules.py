@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+import tokenize
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -213,7 +215,7 @@ def path_in_scope(path, patterns):
     while norm.startswith("./"):
         norm = norm[2:]
     for pattern in patterns:
-        if fnmatch.fnmatchcase(norm, pattern) or fnmatch.fnmatchcase(Path(norm).name, pattern):
+        if fnmatch.fnmatchcase(norm, pattern):
             return True
         if any(ch in pattern for ch in "*?["):
             continue
@@ -411,6 +413,110 @@ def check_risk_tier(ctx):
     return []
 
 
+def hash_comment_at(text, triples=False):
+    quote = ""
+    triple = False
+    escaped = False
+    index = 0
+    length = len(text)
+    while index < length:
+        ch = text[index]
+        if quote:
+            if triple:
+                if text.startswith(quote * 3, index):
+                    quote = ""
+                    triple = False
+                    index += 3
+                    continue
+            elif escaped:
+                escaped = False
+            elif ch == "\\" and quote == '"':
+                escaped = True
+            elif ch == quote:
+                quote = ""
+            index += 1
+            continue
+        if triples and (text.startswith('"""', index) or text.startswith("'''", index)):
+            quote = text[index]
+            triple = True
+            index += 3
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            triple = False
+            escaped = False
+            index += 1
+            continue
+        if ch == HASH and (index == 0 or text[index - 1] not in ("$", "{")):
+            return index
+        index += 1
+    return None
+
+
+def python_comment_at(text):
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if token.type != tokenize.COMMENT:
+                continue
+            comment = token.string
+            body = text.splitlines()[0] if text.splitlines() else text
+            if body.endswith(comment):
+                return len(body) - len(comment)
+            found = body.rfind(comment)
+            if found >= 0:
+                return found
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return hash_comment_at(text, triples=True)
+    return None
+
+
+def slash_comment_at(text, suffix):
+    if suffix == ".rs":
+        quotes = {'"'}
+    elif suffix == ".go":
+        quotes = {'"', "`"}
+    else:
+        quotes = {'"', "'", "`"}
+    quote = ""
+    escaped = False
+    index = 0
+    length = len(text)
+    while index < length:
+        ch = text[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif ch == "\\" and quote != "`":
+                escaped = True
+            elif ch == quote:
+                quote = ""
+            index += 1
+            continue
+        if ch in quotes:
+            quote = ch
+            escaped = False
+            index += 1
+            continue
+        if text.startswith("//", index) or text.startswith("/*", index):
+            return index
+        index += 1
+    return None
+
+
+def comment_slice(text, suffix):
+    if suffix == ".py":
+        index = python_comment_at(text)
+    elif suffix in {".sh", ".nix"}:
+        index = hash_comment_at(text)
+    elif suffix in {".rs", ".js", ".ts", ".go", ".swift"}:
+        index = slash_comment_at(text, suffix)
+    else:
+        index = None
+    if index is None:
+        return None
+    return text[index:]
+
+
 def comment_allowed(stripped, line_no, allow):
     for entry in allow:
         if entry == "#!":
@@ -434,25 +540,19 @@ def check_comments(ctx):
     extensions = set(ctx.manifest["comment_extensions"])
     allow = ctx.manifest["comment_allow"]
     found = []
-    slash_ext = {".rs", ".js", ".ts", ".go", ".swift"}
-    hash_ext = {".py", ".sh", ".nix"}
     for line in ctx.added:
         path = line.get("path", "")
         suffix = Path(path).suffix.lower()
         if suffix not in extensions:
             continue
-        stripped = line.get("text", "").lstrip()
-        if not stripped:
+        raw = line.get("text", "")
+        if not raw.strip():
+            continue
+        comment = comment_slice(raw, suffix)
+        if comment is None:
             continue
         line_no = int(line.get("line_no") or 0)
-        starts = False
-        if suffix in hash_ext and stripped.startswith(HASH):
-            starts = True
-        elif suffix in slash_ext and (stripped.startswith("//") or stripped.startswith("/*")):
-            starts = True
-        if not starts:
-            continue
-        if comment_allowed(stripped, line_no, allow):
+        if comment_allowed(comment.lstrip(), line_no, allow):
             continue
         found.append(Finding(7, level, "comment in " + path + ":" + str(line_no)))
     return found

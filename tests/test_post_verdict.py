@@ -61,15 +61,18 @@ def workflow_routes(names):
 
 class TestPostVerdict(unittest.TestCase):
     def test_rejects_bad_arguments(self):
-        code, _out, err = run(["--repo", "timsonner/repo-gates", "--sha", "abc", "--state", "failure", "--description", "nope", "--app-id", "1"])
+        code, _out, err = run(["--repo", "timsonner/repo-gates", "--sha", SHA, "--state", "failure", "--description", "nope", "--app-id", "1"])
+        self.assertEqual(code, 2)
+        self.assertIn("pr", err)
+        code, _out, err = run(["--repo", "timsonner/repo-gates", "--sha", "abc", "--state", "failure", "--description", "nope", "--pr", "1", "--app-id", "1"])
         self.assertEqual(code, 2)
         self.assertIn("sha", err)
-        code, _out, err = run(["--repo", "timsonner/repo-gates", "--sha", SHA, "--state", "nope", "--description", "nope", "--app-id", "1"])
+        code, _out, err = run(["--repo", "timsonner/repo-gates", "--sha", SHA, "--state", "nope", "--description", "nope", "--pr", "1", "--app-id", "1"])
         self.assertEqual(code, 2)
         long_text = "x" * 141
-        code, _out, err = run(["--repo", "only", "--sha", SHA, "--state", "failure", "--description", "nope", "--app-id", "1"])
+        code, _out, err = run(["--repo", "only", "--sha", SHA, "--state", "failure", "--description", "nope", "--pr", "1", "--app-id", "1"])
         self.assertEqual(code, 2)
-        code, _out, err = run(["--repo", "timsonner/repo-gates", "--sha", SHA, "--state", "failure", "--description", long_text, "--app-id", "1"])
+        code, _out, err = run(["--repo", "timsonner/repo-gates", "--sha", SHA, "--state", "failure", "--description", long_text, "--pr", "1", "--app-id", "1"])
         self.assertEqual(code, 2)
         self.assertIn("140", err)
 
@@ -83,11 +86,12 @@ class TestPostVerdict(unittest.TestCase):
     def test_success_without_trusted_statuses_refuses(self):
         http = FakeHTTP(
             [
+                (route_has("/pulls/5"), (200, {"head": {"sha": SHA}})),
                 (route_has("/statuses"), (200, [])),
                 (route_has("/contents/.github/workflows?"), (404, {})),
             ]
         )
-        code, _out, err = run(["--repo", "timsonner/repo-gates", "--sha", SHA, "--state", "success", "--description", "grade", "--app-id", "1"], http=http)
+        code, _out, err = run(["--repo", "timsonner/repo-gates", "--sha", SHA, "--state", "success", "--description", "grade", "--pr", "5", "--app-id", "1"], http=http)
         self.assertEqual(code, 4)
         self.assertTrue(err)
         self.assertFalse(any("/access_tokens" in call[1] for call in http.calls))
@@ -95,6 +99,20 @@ class TestPostVerdict(unittest.TestCase):
     def test_success_posts_when_trusted_statuses_match(self):
         statuses = [status_item("trusted/house-rules"), status_item("trusted/rules-integrity")]
         routes = [(route_has("/commits/" + SHA + "/statuses"), (200, statuses))]
+        routes.extend(workflow_routes(["ci.yml", "trusted-gate.yml", "release.yml"]))
+        http = FakeHTTP(routes)
+        code, out, err = run(["--repo", "timsonner/repo-gates", "--sha", SHA, "--state", "success", "--description", "grade", "--app-id", "12"], http=http)
+        self.assertEqual(code, 2)
+        self.assertIn("pr", err)
+        self.assertNotEqual(out.strip(), "42 success https://example.test/status/42")
+        self.assertFalse(any(call[0] == "POST" for call in http.calls))
+
+    def test_success_posts_when_pr_head_matches(self):
+        statuses = [status_item("trusted/house-rules"), status_item("trusted/rules-integrity")]
+        routes = [
+            (route_has("/pulls/5"), (200, {"head": {"sha": SHA}})),
+            (route_has("/commits/" + SHA + "/statuses"), (200, statuses)),
+        ]
         routes.extend(workflow_routes(["ci.yml", "trusted-gate.yml", "release.yml"]))
         routes.extend(
             [
@@ -104,7 +122,7 @@ class TestPostVerdict(unittest.TestCase):
             ]
         )
         http = FakeHTTP(routes)
-        code, out, err = run(["--repo", "timsonner/repo-gates", "--sha", SHA, "--state", "success", "--description", "grade", "--app-id", "12"], http=http)
+        code, out, err = run(["--repo", "timsonner/repo-gates", "--sha", SHA, "--state", "success", "--description", "grade", "--pr", "5", "--app-id", "12"], http=http)
         self.assertEqual(code, 0, err)
         self.assertEqual(out, "42 success https://example.test/status/42\n")
         self.assertNotIn("installed-token", out)
@@ -116,12 +134,13 @@ class TestPostVerdict(unittest.TestCase):
         encoded = base64.b64encode(b"context: trusted/house-rules\n").decode("ascii")
         http = FakeHTTP(
             [
+                (route_has("/pulls/5"), (200, {"head": {"sha": SHA}})),
                 (route_has("/commits/" + SHA + "/statuses"), (200, statuses)),
                 (route_has("/contents/.github/workflows?"), (200, listing)),
                 (route_has("/contents/.github/workflows/evil.yml"), (200, {"content": encoded})),
             ]
         )
-        code, _out, err = run(["--repo", "timsonner/repo-gates", "--sha", SHA, "--state", "success", "--description", "grade", "--app-id", "1"], http=http)
+        code, _out, err = run(["--repo", "timsonner/repo-gates", "--sha", SHA, "--state", "success", "--description", "grade", "--pr", "5", "--app-id", "1"], http=http)
         self.assertEqual(code, 4)
         self.assertIn("evil.yml", err)
 

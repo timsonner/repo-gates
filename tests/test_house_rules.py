@@ -172,7 +172,12 @@ class TestC4(FixtureCase):
         module = load_house()
         self.assertTrue(module.path_in_scope(".github/workflows/ci.yml", [".github"]))
         self.assertTrue(module.path_in_scope("README.md", ["*.md"]))
+        self.assertTrue(module.path_in_scope("README.md", ["README.md"]))
+        self.assertFalse(module.path_in_scope("hidden/README.md", ["README.md"]))
         self.assertFalse(module.path_in_scope("src/app.py", ["README.md"]))
+
+    def test_c4_basename_scope(self):
+        self.check("check4_basename_scope.json", 4)
 
 
 class TestC5(FixtureCase):
@@ -206,6 +211,34 @@ class TestC7(FixtureCase):
 
     def test_c7_safety(self):
         self.check("check7_safety.json", 7)
+
+    def test_c7_inline_py(self):
+        self.check("check7_inline_py.json", 7)
+
+    def test_c7_string_hash(self):
+        self.check("check7_string_hash.json", 7)
+
+    def test_c7_inline_js(self):
+        self.check("check7_inline_js.json", 7)
+
+    def test_c7_inline_safety(self):
+        module = load_house()
+        data = load_fixture("good_pr.json")
+        data["added"] = [{"path": "a.rs", "line_no": 8, "text": "let value = 1; // SAFETY: checked bounds"}]
+        data["files"] = ["a.rs"]
+        data["comments_mode"] = "fail"
+        _, findings = evaluate(data)
+        self.assertEqual(module.worst(findings, 7), "PASS")
+
+    def test_c7_inline_after_string(self):
+        module = load_house()
+        data = load_fixture("good_pr.json")
+        marker = chr(35)
+        data["added"] = [{"path": "a.py", "line_no": 4, "text": "value = " + json.dumps(marker + " x") + "  " + marker + " note"}]
+        data["files"] = ["a.py"]
+        data["comments_mode"] = "warn"
+        _, findings = evaluate(data)
+        self.assertEqual(module.worst(findings, 7), "WARN")
 
 
 class TestC9(FixtureCase):
