@@ -39,6 +39,19 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           git fetch --no-tags https://github.com/timsonner/repo-gates.git "$HEAD_SHA"
+      - name: read base repo-gates config
+        id: repoconfig
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/repo-gates.json"
+          if git cat-file -e "$BASE_SHA:.github/repo-gates.json" 2>/dev/null; then
+            git show "$BASE_SHA:.github/repo-gates.json" > "$dest"
+            echo "path=$dest" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=" >> "$GITHUB_OUTPUT"
+          fi
       - name: run house rules
         id: run
         env:
@@ -48,6 +61,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SCOPE_MODE: fail
           COMMENTS_MODE: fail
+          REPO_GATES_CONFIG: ${{ steps.repoconfig.outputs.path }}
         run: |
           set +e
           python3 .trusted/scripts/house-rules.py

@@ -22,3 +22,4 @@ Head: <full SHA>
 - [ ] Evidence pinned to this head
 - [ ] PR body complete
 - [ ] Contribution guidelines read:
+- [ ] Author and committer allowed by repo-gates config

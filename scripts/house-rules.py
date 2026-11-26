@@ -68,7 +68,7 @@ class Finding:
 
 
 class Ctx:
-    def __init__(self, manifest, title, body, commits, files, added, head_sha, scope_mode, comments_mode, allowed_authors):
+    def __init__(self, manifest, title, body, commits, files, added, head_sha, scope_mode, comments_mode, allowed_authors, repo_config=None):
         self.manifest = manifest
         self.title = title or ""
         self.body = body or ""
@@ -79,6 +79,7 @@ class Ctx:
         self.scope_mode = scope_mode or manifest["defaults"]["scope_mode"]
         self.comments_mode = comments_mode or manifest["defaults"]["comments_mode"]
         self.allowed_authors = allowed_authors or ""
+        self.repo_config = repo_config if isinstance(repo_config, dict) else empty_repo_config()
 
 
 def check_meta(ctx, check_id):
@@ -112,6 +113,74 @@ def allowed_identity_set(ctx):
         if text:
             found.add(text)
     return found
+
+
+CONFIG_KEYS = {"authors_mode", "allowed_authors"}
+AUTHORS_MODES = {"owner", "list", "any"}
+CONFIG_FILE = ".github/repo-gates.json"
+
+
+def empty_repo_config():
+    return {"authors_mode": "owner", "allowed_authors": [], "error": ""}
+
+
+def parse_repo_config(text):
+    if text is None:
+        return empty_repo_config()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        failed = empty_repo_config()
+        failed["error"] = "repo-gates config is not valid JSON"
+        return failed
+    if not isinstance(data, dict):
+        failed = empty_repo_config()
+        failed["error"] = "repo-gates config must be a JSON object"
+        return failed
+    problems = []
+    unknown = sorted(str(key) for key in data.keys() if key not in CONFIG_KEYS)
+    if unknown:
+        problems.append("unknown repo-gates config key: " + ", ".join(unknown))
+    mode = data.get("authors_mode", "owner")
+    authors = []
+    if not isinstance(mode, str) or mode not in AUTHORS_MODES:
+        label = mode if isinstance(mode, str) and mode else ""
+        problems.append("bad authors_mode: " + (label or "invalid"))
+        mode = "owner"
+    if "allowed_authors" in data:
+        raw = data.get("allowed_authors")
+        if not isinstance(raw, list) or any((not isinstance(item, str)) or (not item.strip()) for item in raw):
+            problems.append("bad allowed_authors")
+        else:
+            authors = [item.strip() for item in raw]
+    if problems:
+        failed = empty_repo_config()
+        failed["error"] = "; ".join(problems)
+        return failed
+    return {"authors_mode": mode, "allowed_authors": authors, "error": ""}
+
+
+def load_repo_config_path(path):
+    text = (path or "").strip()
+    if not text:
+        return empty_repo_config()
+    try:
+        raw = Path(text).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        failed = empty_repo_config()
+        failed["error"] = "repo-gates config could not be read"
+        return failed
+    return parse_repo_config(raw)
+
+
+def config_changed(ctx):
+    for path in ctx.files:
+        norm = path.replace("\\", "/")
+        while norm.startswith("./"):
+            norm = norm[2:]
+        if norm == CONFIG_FILE:
+            return True
+    return False
 
 
 def compile_shapes(manifest):
@@ -264,16 +333,28 @@ def check_identity(ctx):
     if gate(ctx, 2):
         return []
     level = severity(ctx, 2)
-    allowed = allowed_identity_set(ctx)
     found = []
-    for commit in ctx.commits:
-        author = commit.get("author_name", "") + " <" + commit.get("author_email", "") + ">"
-        committer = commit.get("committer_name", "") + " <" + commit.get("committer_email", "") + ">"
-        sha = commit.get("sha", "")
-        if author not in allowed:
-            found.append(Finding(2, level, "author " + author + " on " + sha))
-        if committer not in allowed:
-            found.append(Finding(2, level, "committer " + committer + " on " + sha))
+    config = ctx.repo_config if isinstance(ctx.repo_config, dict) else empty_repo_config()
+    error = config.get("error") or ""
+    mode = config.get("authors_mode") or "owner"
+    if error:
+        found.append(Finding(2, level, error))
+        mode = "owner"
+    if mode != "any":
+        allowed = allowed_identity_set(ctx)
+        if mode == "list":
+            for item in config.get("allowed_authors") or []:
+                allowed.add(item)
+        for commit in ctx.commits:
+            author = commit.get("author_name", "") + " <" + commit.get("author_email", "") + ">"
+            committer = commit.get("committer_name", "") + " <" + commit.get("committer_email", "") + ">"
+            sha = commit.get("sha", "")
+            if author not in allowed:
+                found.append(Finding(2, level, "author " + author + " on " + sha))
+            if committer not in allowed:
+                found.append(Finding(2, level, "committer " + committer + " on " + sha))
+    if config_changed(ctx):
+        found.append(Finding(2, "WARN", "repo-gates config changed"))
     return found
 
 
@@ -685,6 +766,7 @@ def build_ctx_from_env(manifest):
         os.environ.get("SCOPE_MODE", ""),
         os.environ.get("COMMENTS_MODE", ""),
         os.environ.get("ALLOWED_AUTHORS", ""),
+        load_repo_config_path(os.environ.get("REPO_GATES_CONFIG", "")),
     )
 
 
