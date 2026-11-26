@@ -1,0 +1,35 @@
+{
+  "title": "Stand up the gate",
+  "body": "## Plan\n- Goal: Stand up the gate.\n- Scope (paths): README.md\n- Steps: Add the checker and the tests.\n- Success criteria: The tests pass and the checker reports no FAIL.\n- Risk: low\n- Plan file: n/a\n\n## Evidence\nHead: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n- Commands and exit codes (fmt, lint -D warnings, tests, proof scripts):\npython3 -m unittest discover -s tests -v exit 0\n- Workflow runs / artifacts:\n- Fail-on-old proof (for new or changed tests):\nshown in the job log\n\n## Risk and rollback\n- Risks: A workflow change can grade the wrong tree.\n- Rollback: Revert the pull request.\n\n## Self-check (pr-review-gate)\n- [x] Fail-on-old proof\n- [x] Raw timing tries kept (if timing work)\n- [x] Evidence pinned to this head\n- [x] PR body complete\n- [x] Contribution guidelines read: AGENTS.md in this PR\n- [x] No trailers, author and committer are Tim\n",
+  "commits": [
+    {
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "author_name": "Tim Sonner",
+      "author_email": "66705347+timsonner@users.noreply.github.com",
+      "committer_name": "Tim Sonner",
+      "committer_email": "66705347+timsonner@users.noreply.github.com",
+      "message": "Add the checker"
+    }
+  ],
+  "files": [
+    "README.md"
+  ],
+  "added": [
+    {
+      "path": "README.md",
+      "line_no": 1,
+      "text": "hello"
+    }
+  ],
+  "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "scope_mode": "fail",
+  "comments_mode": "warn",
+  "allowed_authors": "",
+  "mutations": [
+    "emdash-body"
+  ],
+  "id": "emdash-body",
+  "expect": {
+    "3": "FAIL"
+  }
+}

@@ -1,0 +1,57 @@
+name: house-rules
+on:
+  workflow_call:
+    inputs:
+      scope_mode:
+        description: warn or fail when a changed file is outside Scope
+        required: false
+        type: string
+        default: warn
+      comments_mode:
+        description: warn or fail for a new comment
+        required: false
+        type: string
+        default: warn
+      allowed_authors:
+        description: extra Name <email> lines
+        required: false
+        type: string
+        default: ""
+      gates_ref:
+        description: repo-gates commit SHA to check out
+        required: true
+        type: string
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: checkout caller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: checkout repo-gates
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: timsonner/repo-gates
+          ref: ${{ inputs.gates_ref }}
+          path: .repo-gates
+          persist-credentials: false
+      - name: setup python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.12"
+      - name: run house rules
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SCOPE_MODE: ${{ inputs.scope_mode }}
+          COMMENTS_MODE: ${{ inputs.comments_mode }}
+          ALLOWED_AUTHORS: ${{ inputs.allowed_authors }}
+        run: python3 .repo-gates/scripts/house-rules.py

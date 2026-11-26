@@ -1,0 +1,68 @@
+name: release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: resolve previous
+        id: prev
+        run: |
+          sha=$(grep -o '"sha"[[:space:]]*:[[:space:]]*"[^"]*"' .github/trusted-gates.json | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: checkout previous
+        if: steps.prev.outputs.sha != 'bootstrap'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: timsonner/repo-gates
+          ref: ${{ steps.prev.outputs.sha }}
+          path: .prev
+          persist-credentials: false
+      - name: previous tests
+        if: steps.prev.outputs.sha != 'bootstrap'
+        env:
+          HOUSE_RULES_PATH: ${{ github.workspace }}/scripts/house-rules.py
+        run: python3 -m unittest discover -s .prev/tests -v
+      - name: current tests
+        env:
+          HOUSE_RULES_PATH: ${{ github.workspace }}/scripts/house-rules.py
+        run: |
+          python3 -m unittest discover -s tests -v
+          python3 tests/fail_on_old.py
+  tag:
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      statuses: write
+    steps:
+      - name: checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: tag and mark verify
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+          gh api --method POST -H "Accept: application/vnd.github+json" "/repos/$REPO/statuses/$GITHUB_SHA" -f state="success" -f context="release/verify" -f description="release verify passed"
