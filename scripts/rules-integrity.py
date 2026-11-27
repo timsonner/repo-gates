@@ -10,6 +10,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 RESERVED_WORKFLOWS = {"trusted-gate.yml", "release.yml"}
+RESERVED_PATHS = (
+    "scripts/house-rules.py",
+    "scripts/rules-integrity.py",
+    "scripts/read-base-config.sh",
+    "tools/post-verdict.py",
+    ".github/trusted-gates.json",
+)
+FLOOR_KEYS = ("manifest", "fixtures", "tests", "workflows", "house", "fail_on_old")
 LEVEL_RANK = {"off": 0, "PASS": 0, "pass": 0, "WARN": 1, "warn": 1, "FAIL": 2, "fail": 2}
 SKIP_DECORATORS = {"skip", "skipIf", "skipUnless", "expectedFailure"}
 PATTERN_LISTS = ("self_check_labels", "comment_extensions", "placeholders")
@@ -24,6 +32,7 @@ def empty_snapshot():
         "pin": None,
         "house": None,
         "fail_on_old": None,
+        "reserved": {},
     }
 
 
@@ -48,6 +57,9 @@ def snapshot_from_map(files):
             snap["tests"][path] = text
         elif path.startswith(".github/workflows/") and path.endswith((".yml", ".yaml")):
             snap["workflows"][Path(path).name] = text
+    for path in RESERVED_PATHS:
+        if path in files:
+            snap["reserved"][path] = files[path]
     return snap
 
 
@@ -62,13 +74,19 @@ def list_dir_files(root):
         if ".git" in path.parts or "__pycache__" in path.parts:
             continue
         rel = path.relative_to(base).as_posix()
-        if not rel.startswith(("rules/", "tests/", "scripts/", ".github/")):
+        if not include_path(rel):
             continue
         try:
             found[rel] = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
     return found
+
+
+def include_path(path):
+    if path == "tools/post-verdict.py":
+        return True
+    return path.startswith(("rules/", "tests/", "scripts/", ".github/"))
 
 
 def git_paths(sha):
@@ -88,7 +106,7 @@ def git_file(sha, path):
 def snapshot_from_git(sha):
     files = {}
     for path in git_paths(sha):
-        if path.startswith(("rules/", "tests/", "scripts/", ".github/")):
+        if include_path(path):
             text = git_file(sha, path)
             if text is not None:
                 files[path] = text
@@ -394,6 +412,63 @@ def render(findings, empty_base):
     return "\n".join(lines) + "\n"
 
 
+def commit_readable(sha):
+    proc = subprocess.run(["git", "cat-file", "-t", sha], capture_output=True, text=True)
+    return proc.returncode == 0 and proc.stdout.strip() == "commit"
+
+
+def use_base_pin(old, base):
+    if base is None:
+        return old.get("pin")
+    return base.get("pin")
+
+
+def floor_view(snap, pin):
+    view = empty_snapshot()
+    for key in FLOOR_KEYS:
+        view[key] = snap.get(key)
+    view["pin"] = pin
+    return view
+
+
+def extend_new(findings, extra):
+    for item in extra:
+        if item not in findings:
+            findings.append(item)
+
+
+def reserved_script_findings(old, new, body):
+    findings = []
+    risk = risk_of(body)
+    old_files = old.get("reserved") or {}
+    new_files = new.get("reserved") or {}
+    for path in RESERVED_PATHS:
+        if path not in old_files and path not in new_files:
+            continue
+        if old_files.get(path) != new_files.get(path) and risk != "high":
+            findings.append(path + " changed without Risk high")
+    return findings
+
+
+def grade_against_base(old, new, body, checker):
+    base_sha = os.environ.get("BASE_SHA", "").strip()
+    findings = []
+    base = None
+    if base_sha:
+        if not commit_readable(base_sha):
+            findings.append("BASE_SHA is unreadable")
+        else:
+            base = snapshot_from_git(base_sha)
+    pin_old = use_base_pin(old, base)
+    if new.get("pin") == pin_old:
+        checker = None
+    findings.extend(compare_snapshots(floor_view(old, pin_old), new, body, checker))
+    if base is not None:
+        extend_new(findings, compare_snapshots(floor_view(base, new.get("pin")), new, body, None))
+        extend_new(findings, reserved_script_findings(base, new, body))
+    return findings
+
+
 def main():
     trusted_dir = os.environ.get("TRUSTED_DIR", "").strip()
     head = os.environ.get("HEAD_SHA", "HEAD")
@@ -406,9 +481,7 @@ def main():
         empty_base = True
     new = snapshot_from_git(head)
     checker = None if empty_base and (new.get("pin") or {}).get("sha") == "bootstrap" else live_pin_checker
-    if new.get("pin") == old.get("pin"):
-        checker = None
-    findings = compare_snapshots(old, new, body, checker)
+    findings = grade_against_base(old, new, body, checker)
     text = render(findings, empty_base)
     dest = os.environ.get("GITHUB_STEP_SUMMARY")
     if dest:

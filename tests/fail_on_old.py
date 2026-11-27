@@ -76,6 +76,82 @@ def run_base_sha_suite(script_path):
     return proc.returncode, proc.stdout, proc.stderr
 
 
+def run_integrity(script_path, pattern):
+    env = os.environ.copy()
+    env.pop("HOUSE_RULES_DISABLE", None)
+    env.pop("HOUSE_RULES_TEST", None)
+    env.pop("BASE_SHA", None)
+    env.pop("HEAD_SHA", None)
+    env.pop("TRUSTED_DIR", None)
+    env.pop("GITHUB_STEP_SUMMARY", None)
+    env.pop("GITHUB_TOKEN", None)
+    env.pop("GH_TOKEN", None)
+    if script_path:
+        env["RULES_INTEGRITY_SCRIPT"] = script_path
+    else:
+        env.pop("RULES_INTEGRITY_SCRIPT", None)
+    proc = subprocess.run(
+        [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_rules_integrity.py", "-k", pattern],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def replace_once(text, old, new):
+    if text.count(old) != 1:
+        return None
+    return text.replace(old, new, 1)
+
+
+def without_base_pin(text):
+    return replace_once(text, "    pin_old = use_base_pin(old, base)\n", "    pin_old = old.get(\"pin\")\n")
+
+
+def without_reserved_scripts(text):
+    return replace_once(text, "        extend_new(findings, reserved_script_findings(base, new, body))\n", "")
+
+
+def without_unreadable_base(text):
+    return replace_once(text, "            findings.append(\"BASE_SHA is unreadable\")\n", "            pass\n")
+
+
+def caught_each(script_path, patterns):
+    logs = []
+    all_failed = True
+    for pattern in patterns:
+        code, out, err = run_integrity(script_path, pattern)
+        if code == 0:
+            all_failed = False
+            logs.append(out)
+            logs.append(err)
+    if not all_failed:
+        for item in logs:
+            sys.stdout.write(item)
+    return 1 if all_failed else 0
+
+
+def integrity_row(name, weaken, disabled_patterns, enabled_pattern):
+    text = (ROOT / "scripts" / "rules-integrity.py").read_text(encoding="utf-8")
+    weakened = weaken(text)
+    if weakened is None:
+        sys.stdout.write(name + " marker missing\n")
+        return False, "| " + name + " | missing | missing | FAIL |"
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "rules-integrity.py"
+        path.write_text(weakened, encoding="utf-8")
+        disabled = caught_each(str(path), disabled_patterns)
+    enabled, enabled_out, enabled_err = run_integrity("", enabled_pattern)
+    ok = disabled != 0 and enabled == 0
+    if not ok:
+        sys.stdout.write(enabled_out)
+        sys.stdout.write(enabled_err)
+    line = "| " + name + " | " + str(disabled) + " | " + str(enabled) + " | " + ("PASS" if ok else "FAIL") + " |"
+    return ok, line
+
+
 def main():
     if not check8_absent():
         sys.stdout.write("check 8 function or test is present\n")
@@ -121,6 +197,16 @@ def main():
             sys.stdout.write(enabled_out)
             sys.stdout.write(enabled_err)
         lines.append("| base-sha | " + str(disabled) + " | " + str(enabled) + " | " + ("PASS" if ok else "FAIL") + " |")
+    proofs = [
+        ("base-pin", without_base_pin, ["test_base_grade_pin_bootstrap", "test_base_grade_pin_other"], "test_base_grade_pin"),
+        ("reserved-script", without_reserved_scripts, ["test_base_grade_house"], "test_base_grade_house"),
+        ("base-unreadable", without_unreadable_base, ["test_base_grade_unreadable"], "test_base_grade_unreadable"),
+    ]
+    for name, weaken, disabled_patterns, enabled_pattern in proofs:
+        ok_row, line = integrity_row(name, weaken, disabled_patterns, enabled_pattern)
+        if not ok_row:
+            failed = True
+        lines.append(line)
     lines.append("| 8 | n/a | n/a | no function and no tests |")
     text = "\n".join(lines) + "\n"
     sys.stdout.write(text)
