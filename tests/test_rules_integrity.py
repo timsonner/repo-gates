@@ -26,8 +26,17 @@ def workspace_snapshot(module):
 class TestRulesIntegrity(unittest.TestCase):
     def test_empty_base_passes(self):
         module = load_integrity()
-        findings = module.compare_snapshots(module.empty_snapshot(), workspace_snapshot(module), "Risk: high\n", None)
+        new = workspace_snapshot(module)
+        new["pin"] = {"tag": "bootstrap", "sha": "bootstrap"}
+        findings = module.compare_snapshots(module.empty_snapshot(), new, "Risk: high\n", None)
         self.assertEqual(findings, [])
+
+    def test_empty_base_real_pin_needs_checker(self):
+        module = load_integrity()
+        new = workspace_snapshot(module)
+        new["pin"] = {"tag": "v1.0.0", "sha": "481ac8dcacf93ba86742a4ec79a82ccffd1b983d"}
+        findings = module.compare_snapshots(module.empty_snapshot(), new, "Risk: high\n", None)
+        self.assertIn("pin change has no checker", findings)
 
     def test_removed_check_fails(self):
         module = load_integrity()
