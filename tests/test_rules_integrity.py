@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import contextlib
 import copy
 import importlib.util
+import io
 import os
 import re
 import subprocess
@@ -9,10 +11,28 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+PIN_V1 = '{"tag": "v1.0.0", "sha": "481ac8dcacf93ba86742a4ec79a82ccffd1b983d"}\n'
+PIN_BOOT = '{"tag": "bootstrap", "sha": "bootstrap"}\n'
+PIN_OTHER = '{"tag": "v9.9.9", "sha": "' + ("ab" * 20) + '"}\n'
+HOUSE_WITH_GUARDS = (
+    "#!/usr/bin/env python3\n"
+    "import os\n"
+    "import sys\n"
+    "def main():\n"
+    "    if os.environ.get(\"HOUSE_RULES_TEST\") == \"1\":\n"
+    "        return 0\n"
+    "    if os.environ.get(\"GITHUB_ACTIONS\") == \"true\" and os.environ.get(\"HOUSE_RULES_DISABLE\"):\n"
+    "        return 2\n"
+    "    return 0\n"
+    "if __name__ == \"__main__\":\n"
+    "    sys.exit(main())\n"
+)
+HOUSE_STUB = "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\nkept = \"HOUSE_RULES_TEST GITHUB_ACTIONS HOUSE_RULES_DISABLE\"\n"
 
 
 def load_integrity():
-    path = ROOT / "scripts" / "rules-integrity.py"
+    override = os.environ.get("RULES_INTEGRITY_SCRIPT", "")
+    path = Path(override) if override else ROOT / "scripts" / "rules-integrity.py"
     spec = importlib.util.spec_from_file_location("rules_integrity_under_test", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -21,6 +41,50 @@ def load_integrity():
 
 def workspace_snapshot(module):
     return module.snapshot_from_map(module.list_dir_files(ROOT))
+
+
+def write_tree(root, files):
+    for rel, text in files.items():
+        path = Path(root) / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+
+def git_init(repo):
+    subprocess.check_call(["git", "init", "-b", "main"], cwd=repo, stdout=subprocess.DEVNULL)
+    subprocess.check_call(["git", "config", "user.name", "Tim Sonner"], cwd=repo)
+    subprocess.check_call(["git", "config", "user.email", "66705347+timsonner@users.noreply.github.com"], cwd=repo)
+    subprocess.check_call(["git", "config", "commit.gpgsign", "false"], cwd=repo)
+
+
+def git_commit(repo, files, message):
+    write_tree(repo, files)
+    subprocess.check_call(["git", "add", "-A"], cwd=repo)
+    subprocess.check_call(["git", "commit", "-m", message], cwd=repo, stdout=subprocess.DEVNULL)
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+
+
+def run_main(module, repo, env):
+    previous = os.getcwd()
+    keys = ("TRUSTED_DIR", "BASE_SHA", "HEAD_SHA", "PR_BODY", "PR_TITLE", "GITHUB_STEP_SUMMARY", "GITHUB_TOKEN", "GH_TOKEN", "MAIN_REF")
+    saved = {key: os.environ.get(key) for key in keys}
+    try:
+        os.chdir(repo)
+        for key in keys:
+            os.environ.pop(key, None)
+        for key, value in env.items():
+            os.environ[key] = value
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = module.main()
+        return code, stdout.getvalue()
+    finally:
+        os.chdir(previous)
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 class TestRulesIntegrity(unittest.TestCase):
@@ -238,6 +302,83 @@ class TestRulesIntegrity(unittest.TestCase):
         self.assertTrue(any("Risk high" in item for item in module.compare_snapshots(old, edited, "Risk: low\n", None)))
         self.assertEqual(module.compare_snapshots(old, edited, "Risk: high\n", None), [])
 
+    def test_base_grade_pin_bootstrap(self):
+        module = load_integrity()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            trusted = root / "trusted"
+            repo = root / "repo"
+            repo.mkdir()
+            write_tree(trusted, {".github/trusted-gates.json": PIN_BOOT})
+            git_init(repo)
+            base = git_commit(repo, {".github/trusted-gates.json": PIN_V1}, "base")
+            head = git_commit(repo, {".github/trusted-gates.json": PIN_BOOT}, "head")
+            code, text = run_main(module, repo, {"TRUSTED_DIR": str(trusted), "BASE_SHA": base, "HEAD_SHA": head, "PR_BODY": "Risk: high\n"})
+        self.assertEqual(code, 1)
+        self.assertIn("pin moved back to bootstrap", text)
+
+    def test_base_grade_pin_other(self):
+        module = load_integrity()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            trusted = root / "trusted"
+            repo = root / "repo"
+            repo.mkdir()
+            write_tree(trusted, {".github/trusted-gates.json": PIN_OTHER})
+            git_init(repo)
+            base = git_commit(repo, {".github/trusted-gates.json": PIN_V1}, "base")
+            head = git_commit(repo, {".github/trusted-gates.json": PIN_OTHER}, "head")
+            previous = os.getcwd()
+            saved = os.environ.get("BASE_SHA")
+            try:
+                os.chdir(repo)
+                os.environ["BASE_SHA"] = base
+                old = module.snapshot_from_map(module.list_dir_files(trusted))
+                new = module.snapshot_from_git(head)
+                findings = module.grade_against_base(old, new, "Risk: high\n", None)
+            finally:
+                os.chdir(previous)
+                if saved is None:
+                    os.environ.pop("BASE_SHA", None)
+                else:
+                    os.environ["BASE_SHA"] = saved
+        self.assertIn("pin change has no checker", findings)
+
+    def test_base_grade_house(self):
+        module = load_integrity()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            trusted = root / "trusted"
+            repo = root / "repo"
+            repo.mkdir()
+            write_tree(trusted, {".github/trusted-gates.json": PIN_BOOT, "scripts/house-rules.py": HOUSE_WITH_GUARDS})
+            git_init(repo)
+            base = git_commit(repo, {".github/trusted-gates.json": PIN_V1, "scripts/house-rules.py": HOUSE_WITH_GUARDS}, "base")
+            head = git_commit(repo, {"scripts/house-rules.py": HOUSE_STUB}, "head")
+            low_code, low_text = run_main(module, repo, {"TRUSTED_DIR": str(trusted), "BASE_SHA": base, "HEAD_SHA": head, "PR_BODY": "Risk: low\n"})
+            high_code, high_text = run_main(module, repo, {"TRUSTED_DIR": str(trusted), "BASE_SHA": base, "HEAD_SHA": head, "PR_BODY": "Risk: high\n"})
+        self.assertEqual(low_code, 1)
+        self.assertIn("scripts/house-rules.py changed without Risk high", low_text)
+        self.assertNotIn("removed HOUSE_RULES_TEST guard", low_text)
+        self.assertNotIn("removed GITHUB_ACTIONS guard", low_text)
+        self.assertNotIn("removed HOUSE_RULES_DISABLE guard", low_text)
+        self.assertEqual(high_code, 0, high_text)
+        self.assertNotIn("scripts/house-rules.py changed without Risk high", high_text)
+
+    def test_base_grade_unreadable(self):
+        module = load_integrity()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            trusted = root / "trusted"
+            repo = root / "repo"
+            repo.mkdir()
+            write_tree(trusted, {".github/trusted-gates.json": PIN_BOOT})
+            git_init(repo)
+            head = git_commit(repo, {".github/trusted-gates.json": PIN_BOOT}, "head")
+            code, text = run_main(module, repo, {"TRUSTED_DIR": str(trusted), "BASE_SHA": "b" * 40, "HEAD_SHA": head, "PR_BODY": "Risk: high\n"})
+        self.assertEqual(code, 1)
+        self.assertIn("BASE_SHA is unreadable", text)
+
     def test_trusted_gate_workflow(self):
         text = (ROOT / ".github" / "workflows" / "trusted-gate.yml").read_text(encoding="utf-8")
         self.assertIn("pull_request_target", text)
@@ -253,6 +394,8 @@ class TestRulesIntegrity(unittest.TestCase):
         self.assertIn("GITHUB_TOKEN:", text)
         script = (ROOT / "scripts" / "read-base-config.sh").read_text(encoding="utf-8")
         self.assertIn("bash .trusted/scripts/read-base-config.sh", text)
+        rules = text.split("  rules-integrity:\n", 1)[1]
+        self.assertIn("BASE_SHA:", rules.split("python3 .trusted/scripts/rules-integrity.py", 1)[0])
         self.assertIn('git show "$BASE_SHA:.github/repo-gates.json"', script)
         self.assertLess(script.index("\nrequire_base_sha\n"), script.index('git show "$BASE_SHA:.github/repo-gates.json"'))
         self.assertIn("REPO_GATES_CONFIG:", text)
